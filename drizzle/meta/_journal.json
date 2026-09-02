@@ -15,6 +15,13 @@
       "when": 1788353977490,
       "tag": "0001_light_captain_flint",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788354670699,
+      "tag": "0002_needy_peter_quill",
+      "breakpoints": true
     }
   ]
 }

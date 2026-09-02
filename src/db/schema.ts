@@ -1,5 +1,8 @@
 import {
+  index,
+  pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uuid,
@@ -35,3 +38,41 @@ export const users = pgTable("users", {
     .defaultNow()
     .notNull(),
 });
+
+export const membershipRole = pgEnum("membership_role", [
+  "rep",
+  "manager",
+  "admin",
+]);
+
+export const memberships = pgTable(
+  "memberships",
+  {
+    organizationId: uuid("organization_id")
+      .notNull()
+      .references(() => organizations.id, {
+        onDelete: "cascade",
+      }),
+
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+      }),
+
+    role: membershipRole("role").default("rep").notNull(),
+
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+    })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    primaryKey({
+      columns: [table.organizationId, table.userId],
+    }),
+
+    index("memberships_user_id_idx").on(table.userId),
+  ],
+);
