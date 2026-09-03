@@ -1,3 +1,5 @@
+import { and, eq, gt } from "drizzle-orm";
+
 import { db } from "../db/client";
 import { sessions } from "../db/schema";
 import { generateSessionToken, hashSessionToken } from "./session-token";
@@ -22,4 +24,29 @@ export async function createSession(userId: string): Promise<{
     token,
     expiresAt,
   };
+}
+
+export async function getValidSession(token: string): Promise<{
+  id: string;
+  userId: string;
+  expiresAt: Date;
+} | null> {
+  const tokenHash = hashSessionToken(token);
+
+  const [session] = await db
+    .select({
+      id: sessions.id,
+      userId: sessions.userId,
+      expiresAt: sessions.expiresAt,
+    })
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.tokenHash, tokenHash),
+        gt(sessions.expiresAt, new Date()),
+      ),
+    )
+    .limit(1);
+
+  return session ?? null;
 }
