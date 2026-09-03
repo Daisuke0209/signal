@@ -22,6 +22,13 @@
       "when": 1788354670699,
       "tag": "0002_needy_peter_quill",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788435399100,
+      "tag": "0003_simple_post",
+      "breakpoints": true
     }
   ]
 }
