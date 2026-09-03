@@ -7,3 +7,98 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## Project context
+
+Last updated: 2026-09-03
+
+### Product
+
+The application is named **Signal**.
+
+Signal is a real-time sales-assistance application. It understands an ongoing
+customer conversation and suggests what the sales representative should ask or
+say next. When necessary, it retrieves internal product information through RAG
+and shows supporting evidence.
+
+### Primary goal
+
+This project is preparation for an OpenAI Forward Deployed Engineer system
+design interview. The goal is to understand the following topics by designing
+and implementing them:
+
+- full-stack application architecture
+- agents and orchestration
+- retrieval-augmented generation (RAG)
+- authentication and authorization
+- state management
+- tool calling
+- approval for operations with side effects
+- human handoff
+- failure handling
+- logging and tracing
+
+Explaining the design intent and tradeoffs is more important than maximizing
+feature completeness.
+
+### Working approach
+
+- Start with the overall architecture and explicit responsibility boundaries.
+- Implement one small, explainable capability at a time.
+- Before implementation, explain why the proposed design fits and what the
+  reasonable alternatives are.
+- Avoid generating large amounts of code at once.
+- Prefer guiding the user through commands and implementation so they can do the
+  work themselves. Make changes directly only when the user explicitly asks.
+- Record meaningful architectural decisions and their tradeoffs in the repo.
+
+### Minimum product scope
+
+- user login
+- real-time conversation and transcription
+- persistent conversation state
+- suggested next questions
+- suggested next responses
+- RAG over internal product information, with evidence
+- tool calling
+- user approval before side effects
+- authentication and authorization
+- human handoff
+- failure handling
+- logging and tracing
+
+### Agreed implementation order
+
+1. Authentication and database-backed session management
+2. Text-based conversations and conversation state
+3. LLM-generated question and response suggestions
+4. RAG with source attribution
+5. Real-time transcription
+6. Tool calling and approval flows
+7. Human handoff and failure handling
+8. Logging, tracing, and evaluation
+
+Starting with manually entered text keeps the initial agent and state-management
+work independent from speech-provider and real-time transport complexity.
+
+### Current status
+
+- Auth/AuthZ foundation tables exist for organizations, users, and memberships.
+- The Drizzle PostgreSQL client and connection check are implemented.
+- An idempotent demo-data seed creates an organization, user, and admin
+  membership with a hashed password.
+- GitHub Issue #3 and PR #4 are complete.
+- The next milestone is to design authentication and database-backed session
+  management before implementing the login UI.
+
+### Current design direction
+
+For the authentication milestone, compare a framework-managed approach such as
+Auth.js with an opaque, database-backed session token. The database-backed
+option is the initial preference for this educational project because it makes
+session lifecycle, cookie security, revocation, and Auth/AuthZ boundaries
+explicit. Revisit this decision before implementation and document the final
+choice rather than treating it as settled architecture.
+
+Keep this section focused on durable project goals, agreed design decisions,
+the learning approach, and milestone status. Update it when those facts change.
