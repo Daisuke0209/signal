@@ -50,3 +50,9 @@ export async function getValidSession(token: string): Promise<{
 
   return session ?? null;
 }
+
+export async function deleteSession(token: string): Promise<void> {
+  const tokenHash = hashSessionToken(token);
+
+  await db.delete(sessions).where(eq(sessions.tokenHash, tokenHash));
+}
