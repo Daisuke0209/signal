@@ -4,34 +4,31 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:api": "uv run --directory backend uvicorn signal_api.main:app --reload --port 8000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:integration": "node --import tsx --test src/auth/session-store.integration.test.ts",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio",
-    "db:check": "tsx src/db/check.ts",
-    "db:seed": "tsx src/db/seed.ts"
+    "lint:api": "uv run --directory backend ruff check .",
+    "format:api:check": "uv run --directory backend ruff format --check .",
+    "typecheck:api": "uv run --directory backend mypy src tests",
+    "test:api": "uv run --directory backend pytest tests",
+    "test:integration": "uv run --directory backend pytest tests/integration",
+    "db:migrate": "uv run --directory backend alembic -c alembic.ini upgrade head",
+    "db:check-schema": "uv run --directory backend alembic -c alembic.ini check",
+    "db:check": "uv run --directory backend python -m signal_api.check_db",
+    "db:seed": "uv run --directory backend python -m signal_api.seed"
   },
   "dependencies": {
-    "bcryptjs": "^3.0.3",
-    "drizzle-orm": "^0.45.2",
     "next": "16.3.4",
-    "pg": "^8.23.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@types/node": "^20",
-    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "dotenv": "^17.4.2",
-    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
-    "tsx": "^4.23.13",
     "typescript": "^5"
   }
 }

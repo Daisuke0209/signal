@@ -84,12 +84,13 @@ work independent from speech-provider and real-time transport complexity.
 ### Current status
 
 - Auth/AuthZ foundation tables exist for organizations, users, and memberships.
-- The Drizzle PostgreSQL client and connection check are implemented.
+- The backend is implemented in Python with FastAPI, SQLAlchemy, and Alembic.
+- Python dependencies and commands are managed with uv.
 - An idempotent demo-data seed creates an organization, user, and admin
   membership with a hashed password.
-- GitHub Issue #3 and PR #4 are complete.
-- The next milestone is to design authentication and database-backed session
-  management before implementing the login UI.
+- Database-backed session creation, validation, deletion, and integration tests
+  are implemented in Python.
+- Next.js is the frontend and calls the Python API over HTTP.
 
 ### Current design direction
 
@@ -99,6 +100,11 @@ option is the initial preference for this educational project because it makes
 session lifecycle, cookie security, revocation, and Auth/AuthZ boundaries
 explicit. Revisit this decision before implementation and document the final
 choice rather than treating it as settled architecture.
+
+Keep backend application logic in `backend/src/signal_api`. Use FastAPI for the
+HTTP boundary, SQLAlchemy for persistence, Alembic for migrations, pytest for
+tests, Ruff for linting and formatting, and mypy for type checking. Do not add
+new database or authentication logic to the Next.js application.
 
 Keep this section focused on durable project goals, agreed design decisions,
 the learning approach, and milestone status. Update it when those facts change.
