@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from signal_api.database import get_db_session
 from signal_api.models import User
 from signal_api.security import verify_password
-from signal_api.session_store import create_session, get_valid_session
+from signal_api.session_store import create_session, delete_session, get_valid_session
 
 SESSION_COOKIE_NAME = "signal_session"
 
@@ -96,4 +96,22 @@ def get_me(current_user: CurrentUser) -> CurrentUserResponse:
         id=current_user.id,
         name=current_user.name,
         email=current_user.email,
+    )
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    response: Response,
+    db: DatabaseSession,
+    session_token: SessionCookie = None,
+) -> None:
+    if session_token is not None:
+        delete_session(db, session_token)
+
+    response.delete_cookie(
+        key=SESSION_COOKIE_NAME,
+        httponly=True,
+        secure=False,  # ローカル開発用。本番ではTrueにする
+        samesite="lax",
+        path="/",
     )
