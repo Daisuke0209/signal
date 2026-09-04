@@ -10,7 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Project context
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 ### Product
 
@@ -51,6 +51,13 @@ feature completeness.
 - Prefer guiding the user through commands and implementation so they can do the
   work themselves. Make changes directly only when the user explicitly asks.
 - Record meaningful architectural decisions and their tradeoffs in the repo.
+
+### GitHub issue format
+
+- Review previous issues before creating a new issue.
+- Write issues concisely in Japanese.
+- Use the sections `目的`, `対象`, and `完了条件`.
+- Do not add a `対象外` section.
 
 ### Minimum product scope
 
