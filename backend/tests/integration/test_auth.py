@@ -107,3 +107,44 @@ def test_login_rejects_invalid_credentials_without_creating_session(
         )
 
     assert session_count == 0
+
+
+def test_get_me_returns_authenticated_user(
+    login_user: tuple[uuid.UUID, str],
+) -> None:
+    user_id, email = login_user
+
+    with TestClient(app) as client:
+        login_response = client.post(
+            "/auth/login",
+            json={
+                "email": email,
+                "password": TEST_PASSWORD,
+            },
+        )
+        response = client.get("/auth/me")
+
+    assert login_response.status_code == 204
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": str(user_id),
+        "name": "Login Test User",
+        "email": email,
+    }
+
+
+def test_get_me_rejects_missing_cookie() -> None:
+    with TestClient(app) as client:
+        response = client.get("/auth/me")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Authentication required"}
+
+
+def test_get_me_rejects_invalid_session_token() -> None:
+    with TestClient(app) as client:
+        client.cookies.set("signal_session", "invalid-token")
+        response = client.get("/auth/me")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Authentication required"}
