@@ -148,3 +148,63 @@ def test_get_me_rejects_invalid_session_token() -> None:
 
     assert response.status_code == 401
     assert response.json() == {"detail": "Authentication required"}
+
+
+def test_logout_deletes_session_and_cookie(
+    login_user: tuple[uuid.UUID, str],
+) -> None:
+    user_id, email = login_user
+
+    with TestClient(app) as client:
+        login_response = client.post(
+            "/auth/login",
+            json={
+                "email": email,
+                "password": TEST_PASSWORD,
+            },
+        )
+        token = login_response.cookies.get("signal_session")
+
+        logout_response = client.post("/auth/logout")
+        me_response = client.get("/auth/me")
+
+    assert login_response.status_code == 204
+    assert token is not None
+    assert logout_response.status_code == 204
+    assert logout_response.content == b""
+
+    set_cookie = logout_response.headers["set-cookie"].lower()
+    assert "signal_session=" in set_cookie
+    assert "max-age=0" in set_cookie
+    assert "httponly" in set_cookie
+    assert "samesite=lax" in set_cookie
+    assert "path=/" in set_cookie
+
+    with SessionLocal() as db:
+        stored_session = db.scalar(
+            select(UserSession).where(UserSession.user_id == user_id)
+        )
+
+    assert stored_session is None
+    assert me_response.status_code == 401
+    assert me_response.json() == {"detail": "Authentication required"}
+
+
+def test_logout_without_cookie_is_idempotent() -> None:
+    with TestClient(app) as client:
+        first_response = client.post("/auth/logout")
+        second_response = client.post("/auth/logout")
+
+    assert first_response.status_code == 204
+    assert second_response.status_code == 204
+    assert "max-age=0" in first_response.headers["set-cookie"].lower()
+    assert "max-age=0" in second_response.headers["set-cookie"].lower()
+
+
+def test_logout_with_invalid_session_token_is_idempotent() -> None:
+    with TestClient(app) as client:
+        client.cookies.set("signal_session", "invalid-token")
+        response = client.post("/auth/logout")
+
+    assert response.status_code == 204
+    assert "max-age=0" in response.headers["set-cookie"].lower()
