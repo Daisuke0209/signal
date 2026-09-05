@@ -1,35 +1,54 @@
+import pytest
+
 from signal_api.models import ConversationParticipantSide
-from signal_api.transcription import TranscriptState, parse_transcript_event
+from signal_api.transcription import (
+    COMPLETED,
+    DELTA,
+    TranscriptionFailure,
+    TranscriptState,
+    parse_transcript_event,
+)
 
-DELTA = "conversation.item.input_audio_transcription.delta"
-COMPLETED = "conversation.item.input_audio_transcription.completed"
+
+def event(kind: str, item: str, text: str = "") -> dict[str, object]:
+    return {"type": kind, "item_id": item, "delta": text, "transcript": text}
 
 
-def test_partial_is_replaced_and_final_is_deduplicated() -> None:
+def test_deltas_accumulate_including_spaces_and_final_replaces_them() -> None:
     state = TranscriptState()
-    first = parse_transcript_event(
-        "microphone", {"type": DELTA, "item_id": "item-1", "delta": "こんに"}
-    )
-    second = parse_transcript_event(
-        "microphone", {"type": DELTA, "item_id": "item-1", "delta": "こんにちは"}
-    )
-    final = parse_transcript_event(
-        "microphone",
-        {"type": COMPLETED, "item_id": "item-1", "transcript": "こんにちは"},
-    )
-    assert first is not None and second is not None and final is not None
-    state.apply(first)
-    state.apply(second)
-    assert state.partials[("microphone", "item-1")] == second
-    assert state.apply(final) == final
-    assert state.apply(final) is None
-    assert final.side is ConversationParticipantSide.SALES_REP
+    state.apply("microphone", event("input_audio_buffer.committed", "1"))
+    for text in ["こんに", "ちは", " ", "世界"]:
+        updates = state.apply("microphone", event(DELTA, "1", text))
+    assert updates[0].text == "こんにちは 世界"
+    final = state.apply("microphone", event(COMPLETED, "1", "こんにちは、世界"))
+    assert final[0].final
+    assert final[0].side is ConversationParticipantSide.SALES_REP
+    assert state.apply("microphone", event(COMPLETED, "1", "重複")) == []
+    assert state.apply("microphone", event(DELTA, "1", "遅延")) == []
+    assert not state.partials
 
 
-def test_tab_source_is_customer() -> None:
-    update = parse_transcript_event(
-        "display",
-        {"type": COMPLETED, "item_id": "item-2", "transcript": "資料を見ました"},
+def test_reversed_completions_wait_for_audio_commit_order() -> None:
+    state = TranscriptState()
+    for item in ["1", "2"]:
+        state.apply("display", event("input_audio_buffer.committed", item))
+    assert state.apply("display", event(COMPLETED, "2", "二番目")) == []
+    updates = state.apply("display", event(COMPLETED, "1", "一番目"))
+    assert [u.item_id for u in updates] == ["1", "2"]
+    assert all(u.side is ConversationParticipantSide.CUSTOMER for u in updates)
+
+
+def test_empty_final_clears_partial_and_unknown_event_is_ignored() -> None:
+    state = TranscriptState()
+    state.apply("display", event(DELTA, "1", "途中"))
+    assert state.apply("display", event(COMPLETED, "1", "")) == []
+    assert (
+        state.apply("display", event("input_audio_buffer.committed", "1"))[0].text == ""
     )
-    assert update is not None
-    assert update.side is ConversationParticipantSide.CUSTOMER
+    assert not state.partials
+    assert parse_transcript_event("display", event("unknown", "x", "text")) is None
+
+
+def test_provider_error_has_no_raw_payload() -> None:
+    with pytest.raises(TranscriptionFailure, match="^provider_error$"):
+        TranscriptState().apply("display", {"type": "error", "error": "secret payload"})
