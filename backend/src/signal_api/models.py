@@ -299,3 +299,58 @@ class ConversationMessage(Base):
         nullable=False,
         server_default=func.now(),
     )
+
+
+class DocumentProcessingStatus(StrEnum):
+    PENDING = "pending"
+    PROCESSING = "processing"
+    READY = "ready"
+    FAILED = "failed"
+    TEXT_UNAVAILABLE = "text_unavailable"
+
+
+document_processing_status_type = Enum(
+    DocumentProcessingStatus,
+    name="document_processing_status",
+    values_callable=lambda members: [member.value for member in members],
+)
+
+
+class Document(Base):
+    __tablename__ = "documents"
+    __table_args__ = (Index("documents_organization_id_idx", "organization_id"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "organizations.id",
+            name="documents_organization_id_organizations_id_fk",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    uploaded_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            name="documents_uploaded_by_user_id_users_id_fk",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    byte_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_key: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    processing_status: Mapped[DocumentProcessingStatus] = mapped_column(
+        document_processing_status_type,
+        nullable=False,
+        server_default=text("'pending'"),
+    )
+    processing_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

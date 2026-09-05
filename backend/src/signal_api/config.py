@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     database_url: str
     seed_demo_password: SecretStr | None = None
     backend_cors_origins: str = "http://localhost:3000"
+    document_storage_dir: Path = ROOT_ENV_FILE.parent / ".local" / "documents"
+    document_max_size_bytes: int = 20 * 1024 * 1024
+    document_max_count_per_organization: int = 100
 
     @property
     def sqlalchemy_database_url(self) -> str:
