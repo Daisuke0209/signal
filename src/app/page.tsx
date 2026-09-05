@@ -250,6 +250,9 @@ export default function Home() {
         })
         .catch(() => {
           // A transport failure keeps the disconnected state visible.
+        })
+        .finally(() => {
+          revalidating = false;
         });
     };
     const handleAccessRevoked = () => {
