@@ -193,6 +193,34 @@
   background: #fff0ef;
 }
 
+.rowActions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.retryButton {
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid #d9dee6;
+  border-radius: 8px;
+  color: #465366;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.retryButton:hover:not(:disabled) {
+  background: #f5f7fa;
+}
+
+.retryButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .center {
   display: grid;
   min-height: 100dvh;

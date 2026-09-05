@@ -40,3 +40,6 @@ export const uploadDocument = (organizationId: string, file: File) => {
 
 export const extractDocument = (documentId: string) =>
   json<Document>(`/documents/${documentId}/extract`, { method: "POST" });
+
+export const retryDocument = (documentId: string) =>
+  json<Document>(`/documents/${documentId}/retry`, { method: "POST" });

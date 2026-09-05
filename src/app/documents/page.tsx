@@ -9,6 +9,7 @@ import {
   extractDocument,
   listDocuments,
   uploadDocument,
+  retryDocument,
 } from "@/lib/documents-api";
 import styles from "./page.module.css";
 
@@ -27,6 +28,17 @@ function formatRegisteredAt(value: string): string {
   }).format(new Date(value));
 }
 
+function processingErrorLabel(document: Document): string | null {
+  if (!document.processing_error) return null;
+  if (document.processing_status === "failed") {
+    return "PDFの解析に失敗しました。原本を確認して再度お試しください。";
+  }
+  if (document.processing_status === "text_unavailable") {
+    return "PDFから本文を取得できませんでした。";
+  }
+  return document.processing_error;
+}
+
 export default function DocumentsPage() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [organizationId, setOrganizationId] = useState("");
@@ -35,13 +47,19 @@ export default function DocumentsPage() {
   const [loadingDocuments, setLoadingDocuments] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [retrying, setRetrying] = useState<string | null>(null);
   const selectedOrganizationId = useRef("");
   const listRequestGeneration = useRef(0);
+  const documentOperationGeneration = useRef(0);
   const mounted = useRef(false);
 
   function selectOrganization(nextOrganizationId: string) {
+    documentOperationGeneration.current += 1;
     selectedOrganizationId.current = nextOrganizationId;
     setOrganizationId(nextOrganizationId);
+    setDocuments([]);
+    setRetrying(null);
+    setError("");
   }
 
   async function loadDocuments(nextOrganizationId: string) {
@@ -130,6 +148,34 @@ export default function DocumentsPage() {
     }
   }
 
+  async function retry(document: Document) {
+    if (retrying || document.processing_status === "processing") return;
+    const retryOrganizationId = selectedOrganizationId.current;
+    const retryGeneration = documentOperationGeneration.current;
+    const isCurrentRetry = () =>
+      mounted.current &&
+      selectedOrganizationId.current === retryOrganizationId &&
+      documentOperationGeneration.current === retryGeneration;
+    setRetrying(document.id);
+    setError("");
+    try {
+      const next = await retryDocument(document.id);
+      if (isCurrentRetry()) {
+        setDocuments((items) =>
+          items.map((item) => (item.id === next.id ? next : item)),
+        );
+      }
+    } catch {
+      if (isCurrentRetry()) {
+        setError("資料を再解析できませんでした。もう一度お試しください。");
+      }
+    } finally {
+      if (isCurrentRetry()) {
+        setRetrying(null);
+      }
+    }
+  }
+
   if (checking) {
     return <main className={styles.center}>セッションを確認しています…</main>;
   }
@@ -207,13 +253,25 @@ export default function DocumentsPage() {
                   <p>
                     {formatRegisteredAt(document.created_at)} · {document.uploaded_by_name}
                   </p>
-                  {document.processing_error && (
-                    <p className={styles.failure}>{document.processing_error}</p>
+                  {processingErrorLabel(document) && (
+                    <p className={styles.failure}>{processingErrorLabel(document)}</p>
                   )}
                 </div>
-                <span data-status={document.processing_status}>
-                  {statusLabel[document.processing_status]}
-                </span>
+                <div className={styles.rowActions}>
+                  <span data-status={document.processing_status}>
+                    {statusLabel[document.processing_status]}
+                  </span>
+                  {document.processing_status !== "ready" &&
+                    document.processing_status !== "processing" && (
+                      <button
+                        className={styles.retryButton}
+                        disabled={retrying !== null}
+                        onClick={() => void retry(document)}
+                      >
+                        {retrying === document.id ? "再解析中…" : "再解析"}
+                      </button>
+                    )}
+                </div>
               </li>
             ))}
           </ul>
