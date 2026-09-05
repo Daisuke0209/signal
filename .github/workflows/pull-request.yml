@@ -1,0 +1,55 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+psycopg://signal:signal@localhost:5432/signal
+      SEED_DEMO_PASSWORD: ci-demo-password
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: signal
+          POSTGRES_USER: signal
+          POSTGRES_PASSWORD: signal
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U signal -d signal"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --project backend --all-groups --locked
+      - run: uv run --directory backend alembic -c alembic.ini upgrade head
+      - run: uv run --directory backend ruff format --check .
+      - run: uv run --directory backend ruff check .
+      - run: uv run --directory backend mypy src tests
+      - run: uv run --directory backend pytest tests
