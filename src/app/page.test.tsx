@@ -1104,3 +1104,51 @@ it("discards delayed approvals from a conversation that was switched away from",
   resolveApprovals?.(jsonResponse([{ id: "old", conversation_id: first.id, operation: "internal_handoff", target: "営業支援", input: { summary: "古い承認" }, evidence: [], status: "pending", requested_by_user_id: currentUser.id, decided_by_user_id: null, decided_at: null, created_at: first.created_at }]));
   await waitFor(() => expect(screen.queryByText("古い承認")).toBeNull());
 });
+
+it("discards delayed approval creation after switching conversations", async () => {
+  let resolveCreate: ((response: Response) => void) | undefined;
+  const first = { id: "conversation-create-1", organization_id: "org-1", status: "active", created_at: "2026-09-05T12:00:00Z" };
+  const second = { ...first, id: "conversation-create-2" };
+  const detail = (conversation: typeof first) => ({ ...conversation, created_by_user_id: currentUser.id, participants: [], messages: [] });
+  vi.stubGlobal("fetch", vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] }))
+    .mockResolvedValueOnce(jsonResponse([first, second]))
+    .mockResolvedValueOnce(jsonResponse(detail(first)))
+    .mockResolvedValueOnce(jsonResponse([]))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveCreate = resolve; }))
+    .mockResolvedValueOnce(jsonResponse(detail(second))));
+  render(<Home />);
+  await screen.findByText("進行中の商談");
+  fireEvent.click(screen.getByRole("button", { name: /承認が必要な操作.*確認する/ }));
+  await screen.findByText("承認待ちの操作はありません。");
+  fireEvent.change(screen.getByLabelText("依頼内容"), { target: { value: "古い作成" } });
+  fireEvent.click(screen.getByRole("button", { name: "承認依頼を作成" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+  await screen.findByText("進行中の商談");
+  resolveCreate?.(jsonResponse({ id: "old-create", conversation_id: first.id, operation: "internal_handoff", target: "営業支援", input: { summary: "古い作成" }, evidence: [], status: "pending", requested_by_user_id: currentUser.id, decided_by_user_id: null, decided_at: null, created_at: first.created_at }));
+  await waitFor(() => expect(screen.queryByText("古い作成")).toBeNull());
+});
+
+it("discards delayed approval decisions after switching conversations", async () => {
+  let resolveDecision: ((response: Response) => void) | undefined;
+  const first = { id: "conversation-decide-1", organization_id: "org-1", status: "active", created_at: "2026-09-05T12:00:00Z" };
+  const second = { ...first, id: "conversation-decide-2" };
+  const detail = (conversation: typeof first) => ({ ...conversation, created_by_user_id: currentUser.id, participants: [], messages: [] });
+  const pending = { id: "old-decision", conversation_id: first.id, operation: "internal_handoff", target: "営業支援", input: { summary: "古い決定" }, evidence: [], status: "pending", requested_by_user_id: currentUser.id, decided_by_user_id: null, decided_at: null, created_at: first.created_at };
+  vi.stubGlobal("fetch", vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] }))
+    .mockResolvedValueOnce(jsonResponse([first, second]))
+    .mockResolvedValueOnce(jsonResponse(detail(first)))
+    .mockResolvedValueOnce(jsonResponse([pending]))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveDecision = resolve; }))
+    .mockResolvedValueOnce(jsonResponse(detail(second))));
+  render(<Home />);
+  await screen.findByText("進行中の商談");
+  fireEvent.click(screen.getByRole("button", { name: /承認が必要な操作.*確認する/ }));
+  expect(await screen.findByText("古い決定")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "承認" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+  await screen.findByText("進行中の商談");
+  resolveDecision?.(jsonResponse({ ...pending, status: "approved", decided_by_user_id: currentUser.id, decided_at: first.created_at }));
+  await waitFor(() => expect(screen.queryByText("古い決定")).toBeNull());
+});
