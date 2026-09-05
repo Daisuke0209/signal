@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import {
   addMessage,
   Conversation,
@@ -285,6 +286,9 @@ export default function Home() {
           </span>
           Signal
         </div>
+        <Link className={styles.documentsLink} href="/documents">
+          資料を管理
+        </Link>
         <button
           className={styles.newConversation}
           onClick={() => void start()}

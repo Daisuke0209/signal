@@ -1,0 +1,227 @@
+.page {
+  min-height: 100dvh;
+  color: #252e3b;
+  background: #fbfbfc;
+}
+
+.header,
+.content {
+  max-width: 980px;
+  margin: 0 auto;
+  padding-right: 32px;
+  padding-left: 32px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-top: 64px;
+  padding-bottom: 42px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.header h1 {
+  margin: 0;
+  font-size: 30px;
+  letter-spacing: -1px;
+}
+
+.intro,
+.toolbar p,
+.documentList p,
+.empty {
+  color: #6e7785;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.intro {
+  margin: 10px 0 0;
+}
+
+.workspaceLink {
+  padding: 10px 13px;
+  border: 1px solid #d9dee6;
+  border-radius: 8px;
+  color: #3f4a5a;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.content {
+  padding-top: 42px;
+  padding-bottom: 72px;
+}
+
+.toolbar,
+.controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.toolbar h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.toolbar p {
+  margin: 8px 0 0;
+}
+
+.controls {
+  align-items: center;
+}
+
+.organization {
+  display: grid;
+  gap: 4px;
+  color: #677181;
+  font-size: 11px;
+}
+
+.organization select {
+  min-width: 160px;
+  padding: 8px;
+  border: 1px solid #d9dee6;
+  border-radius: 7px;
+  color: #343d4a;
+  background: white;
+}
+
+.uploadButton {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 8px;
+  color: white;
+  background: #293445;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.uploadButton input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.uploadButton:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.error {
+  margin: 24px 0 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  color: #994848;
+  background: #fff6f5;
+  font-size: 14px;
+}
+
+.empty {
+  margin: 32px 0 0;
+  padding: 48px 0;
+  border-top: 1px solid #e6e9ee;
+  border-bottom: 1px solid #e6e9ee;
+  text-align: center;
+}
+
+.documentList {
+  padding: 0;
+  margin: 28px 0 0;
+  border-top: 1px solid #e6e9ee;
+  list-style: none;
+}
+
+.documentList li {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 4px;
+  border-bottom: 1px solid #e6e9ee;
+}
+
+.documentList h3,
+.documentList p {
+  margin: 0;
+}
+
+.documentList h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.documentList p {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.documentList .failure {
+  color: #994848;
+}
+
+.documentList span {
+  flex: 0 0 auto;
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #657181;
+  background: #eef0f3;
+  font-size: 11px;
+}
+
+.documentList span[data-status="ready"] {
+  color: #35745f;
+  background: #e8f4ed;
+}
+
+.documentList span[data-status="failed"],
+.documentList span[data-status="text_unavailable"] {
+  color: #994848;
+  background: #fff0ef;
+}
+
+.center {
+  display: grid;
+  min-height: 100dvh;
+  place-content: center;
+  gap: 16px;
+  color: #4d5868;
+  text-align: center;
+}
+
+.center a {
+  color: #293445;
+}
+
+@media (max-width: 700px) {
+  .header,
+  .toolbar,
+  .controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .header,
+  .content {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .workspaceLink,
+  .uploadButton {
+    justify-content: center;
+  }
+}

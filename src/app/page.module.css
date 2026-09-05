@@ -70,6 +70,16 @@
   font-weight: 550;
   box-shadow: 0 2px 3px #202b3b04;
 }
+.documentsLink {
+  display: block;
+  margin: 18px 10px -22px;
+  color: #677181;
+  font-size: 12px;
+  text-decoration: none;
+}
+.documentsLink:hover {
+  color: var(--text-primary);
+}
 .newConversation:hover {
   background: #ebeef3;
 }
