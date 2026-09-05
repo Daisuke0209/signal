@@ -633,12 +633,58 @@ class ApprovalRequest(Base):
     )
 
 
+class InternalHandoffStatus(StrEnum):
+    OPEN = "open"
+    CLAIMED = "claimed"
+    RESOLVED = "resolved"
+
+
 class InternalHandoff(Base):
     __tablename__ = "internal_handoffs"
+    __table_args__ = (
+        CheckConstraint(
+            "(status = 'open' AND assignee_user_id IS NULL "
+            "AND response_content IS NULL) "
+            "OR (status = 'claimed' AND assignee_user_id IS NOT NULL "
+            "AND response_content IS NULL) "
+            "OR (status = 'resolved' AND assignee_user_id IS NOT NULL "
+            "AND response_content IS NOT NULL)",
+            name="internal_handoffs_state_check",
+        ),
+        Index("internal_handoffs_status_assignee_idx", "status", "assignee_user_id"),
+    )
+
     approval_request_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("approval_requests.id", ondelete="CASCADE"),
         primary_key=True,
+    )
+    status: Mapped[InternalHandoffStatus] = mapped_column(
+        Enum(
+            InternalHandoffStatus,
+            values_callable=lambda members: [member.value for member in members],
+            name="internal_handoff_status",
+            native_enum=False,
+            create_constraint=False,
+        ),
+        nullable=False,
+        server_default=text("'open'"),
+    )
+    assignee_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    response_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    responded_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
+    )
+    responded_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
