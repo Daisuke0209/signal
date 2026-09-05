@@ -432,13 +432,6 @@
   font-weight: 550;
   color: #51617b;
 }
-.suggestionEmpty {
-  font-size: 24px;
-  line-height: 1.6;
-  letter-spacing: -0.8px;
-  color: #788ba8;
-  margin-top: 27px;
-}
 .suggestionHint {
   margin-top: 10px;
   font-size: 11px;
@@ -454,13 +447,6 @@
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.9;
-}
-.assistFootnote {
-  margin-top: auto;
-  padding-top: 32px;
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.8;
 }
 .error {
   margin: 12px 24px 0;

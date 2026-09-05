@@ -505,7 +505,6 @@ export default function Home() {
                 <span aria-hidden="true">↗</span>
                 <h3>次に聞くこと</h3>
               </div>
-              <p className={styles.suggestionEmpty}>次の一問を、ここに。</p>
               <p className={styles.suggestionHint}>
                 会話に合わせた質問を表示します。
               </p>
@@ -524,9 +523,6 @@ export default function Home() {
               </div>
               <p>確認が必要な条件や、未解決の論点を表示します。</p>
             </section>
-            <p className={styles.assistFootnote}>
-              提案が表示されたら、内容を確認して会話にご活用ください。
-            </p>
           </aside>
         </div>
       </div>
