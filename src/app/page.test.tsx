@@ -737,6 +737,7 @@ describe("authentication page", () => {
     );
     render(<Home />);
     await screen.findByText("進行中の商談");
+    await waitFor(() => expect(suggestionMocks.connect).toHaveBeenCalledOnce());
     const onConnectionError = suggestionMocks.connect.mock.calls[0][2] as () => void;
 
     onConnectionError();
