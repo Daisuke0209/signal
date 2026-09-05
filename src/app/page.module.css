@@ -189,17 +189,11 @@
   padding: 24px 38px;
   border-bottom: 1px solid var(--border);
 }
-.eyebrow {
-  font-size: 9px;
-  font-weight: 550;
-  letter-spacing: 1.8px;
-  color: var(--text-muted);
-}
 .sessionHeader h1 {
   font-size: 21px;
   font-weight: 580;
   letter-spacing: -0.7px;
-  margin-top: 8px;
+  margin-top: 0;
 }
 .audioControls {
   display: flex;
@@ -266,7 +260,7 @@
   padding-bottom: 30px;
 }
 .panelHead h2 {
-  margin-top: 8px;
+  margin-top: 0;
   font-size: 17px;
   font-weight: 580;
   letter-spacing: -0.5px;

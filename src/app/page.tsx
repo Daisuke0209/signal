@@ -343,7 +343,6 @@ export default function Home() {
       <div className={styles.stage}>
         <header className={styles.sessionHeader}>
           <div>
-            <p className={styles.eyebrow}>WORKSPACE</p>
             <h1>
               {conversation
                 ? conversation.status === "active"
@@ -400,7 +399,6 @@ export default function Home() {
           >
             <div className={styles.panelHead}>
               <div>
-                <p className={styles.eyebrow}>CONVERSATION</p>
                 <h2 id="transcript-title">文字起こし</h2>
               </div>
               <span className={styles.panelMeta}>
@@ -498,7 +496,6 @@ export default function Home() {
           <aside className={styles.assist} aria-labelledby="assist-title">
             <div className={styles.panelHead}>
               <div>
-                <p className={styles.eyebrow}>LIVE ASSIST</p>
                 <h2 id="assist-title">営業支援</h2>
               </div>
               <span className={styles.assistLabel}>提案を待機中</span>
