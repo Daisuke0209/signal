@@ -1221,3 +1221,28 @@ it("discards delayed handoff claim and response results after switching conversa
   expect(screen.queryByRole("button", { name: "回答して解決" })).toBeNull();
   expect(resolveResponse).toBeUndefined();
 });
+
+it("discards a delayed handoff response after switching conversations", async () => {
+  let resolveResponse: ((response: Response) => void) | undefined;
+  const first = { id: "handoff-response-1", organization_id: "org-1", status: "active", created_at: "2026-09-05T12:00:00Z" };
+  const second = { ...first, id: "handoff-response-2" };
+  const detail = (conversation: typeof first) => ({ ...conversation, created_by_user_id: currentUser.id, participants: [], messages: [] });
+  const handoff = { approval_request_id: "handoff-response", conversation_id: first.id, target: "営業支援", summary: "古い回答", evidence: [], requested_by_user_id: currentUser.id, created_at: first.created_at, status: "claimed", assignee_user_id: currentUser.id, claimed_at: first.created_at, response_content: null, responded_by_user_id: null, responded_at: null, resolved_at: null };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] }))
+    .mockResolvedValueOnce(jsonResponse([first, second]))
+    .mockResolvedValueOnce(jsonResponse(detail(first)))
+    .mockResolvedValueOnce(jsonResponse([handoff]))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveResponse = resolve; }))
+    .mockResolvedValueOnce(jsonResponse(detail(second)));
+  vi.stubGlobal("fetch", fetchMock); render(<Home />);
+  await screen.findByText("進行中の商談");
+  fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+  expect(await screen.findByText("古い回答")).toBeDefined();
+  fireEvent.change(screen.getByLabelText("回答 営業支援"), { target: { value: "古い会話への回答" } });
+  fireEvent.click(screen.getByRole("button", { name: "回答して解決" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+  resolveResponse?.(jsonResponse({ ...handoff, status: "resolved", response_content: "古い会話への回答", responded_by_user_id: currentUser.id, responded_at: first.created_at, resolved_at: first.created_at }));
+  await waitFor(() => expect(screen.queryByText("古い回答")).toBeNull());
+  expect(screen.queryByText("古い会話への回答")).toBeNull();
+});
