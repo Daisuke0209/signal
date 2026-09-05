@@ -24,7 +24,6 @@ from signal_api.observability import (
 from signal_api.suggestion_runtime import SuggestionRuntime, create_agent
 from signal_api.suggestion_stream import router as suggestion_stream_router
 from signal_api.suggestions import router as suggestions_router
-from signal_api.trace_routes import router as trace_router
 from signal_api.summaries import (
     SummaryWorker,
     recover_summaries,
@@ -32,6 +31,7 @@ from signal_api.summaries import (
 from signal_api.summaries import (
     router as summaries_router,
 )
+from signal_api.trace_routes import router as trace_router
 from signal_api.transcription_routes import router as transcription_router
 
 settings = get_settings()

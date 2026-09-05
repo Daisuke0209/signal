@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from signal_api.auth import CurrentUser
 from signal_api.config import get_settings
 from signal_api.database import SessionLocal, get_db_session
+from signal_api.domain_traces import span, trace, trace_context
 from signal_api.models import (
     Conversation,
     ConversationMessage,
@@ -162,6 +163,13 @@ def set_state(
         if status in {"succeeded", "failed"}:
             item.completed_at = datetime.now(UTC)
         db.commit()
+        with trace_context(cid, generation=attempt):
+            trace(
+                "summary." + status,
+                outcome="failed" if status == "failed" else "complete",
+                error_code=error_code,
+                retryable=status == "failed",
+            )
         return True
 
 
@@ -210,5 +218,7 @@ class SummaryWorker:
         self.capacity = asyncio.Semaphore(2)
 
     async def run(self, cid: uuid.UUID, attempt: int, transcript: str) -> None:
-        async with self.capacity:
-            await run_summary(cid, attempt, transcript)
+        with trace_context(cid, generation=attempt):
+            async with self.capacity:
+                with span("summary.generate"):
+                    await run_summary(cid, attempt, transcript)
