@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     document_storage_dir: Path = ROOT_ENV_FILE.parent / ".local" / "documents"
     document_max_size_bytes: int = 20 * 1024 * 1024
     document_max_count_per_organization: int = 100
+    document_max_pages: int = 200
+    document_max_extracted_text_bytes: int = 2_000_000
 
     @property
     def sqlalchemy_database_url(self) -> str:

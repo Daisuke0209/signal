@@ -13,7 +13,7 @@ from signal_api import documents
 from signal_api.config import get_settings
 from signal_api.database import SessionLocal
 from signal_api.main import app
-from signal_api.models import Document, Membership, Organization, User
+from signal_api.models import Document, DocumentPage, Membership, Organization, User
 from signal_api.security import hash_password
 
 PASSWORD = "document-api-test-password"
@@ -169,6 +169,53 @@ def test_list_documents_returns_metadata_newest_first(
     assert rows[0]["uploaded_by_name"] == "Documents"
 
 
+def test_extract_document_persists_multipage_text(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
+    organization_id, email = document_user
+    fixture = Path(__file__).parents[1] / "fixtures" / "signal-demo-product.pdf"
+    storage_key = str(uuid.uuid4())
+    (storage / storage_key).write_bytes(fixture.read_bytes())
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="sample.pdf",
+            content_type="application/pdf",
+            byte_size=fixture.stat().st_size,
+            storage_key=storage_key,
+        )
+        db.add(document)
+        db.commit()
+        document_id = document.id
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        response = client.post(f"/documents/{document_id}/extract")
+    assert response.status_code == 200
+    assert response.json()["processing_status"] == "ready"
+    with SessionLocal() as db:
+        pages = db.scalars(
+            select(DocumentPage)
+            .where(DocumentPage.document_id == document_id)
+            .order_by(DocumentPage.page_number)
+        ).all()
+    assert [page.page_number for page in pages] == [1, 2, 3]
+    assert any(page.content.strip() for page in pages)
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        assert client.post(f"/documents/{document_id}/extract").status_code == 200
+    with SessionLocal() as db:
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(DocumentPage)
+                .where(DocumentPage.document_id == document_id)
+            )
+            == 3
+        )
+
+
 def test_document_upload_rejects_authenticated_nonmember(
     document_user: tuple[uuid.UUID, str], storage: Path
 ) -> None:
@@ -267,3 +314,78 @@ def test_document_upload_rejects_invalid_input_without_storage(
             )
             is None
         )
+
+
+def test_extract_malformed_document_has_safe_failed_state(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
+    organization_id, email = document_user
+    key = str(uuid.uuid4())
+    (storage / key).write_bytes(b"%PDF-broken")
+    with SessionLocal() as db:
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=db.scalar(select(User.id).where(User.email == email)),
+            filename="bad.pdf",
+            content_type="application/pdf",
+            byte_size=11,
+            storage_key=key,
+        )
+        db.add(document)
+        db.commit()
+        document_id = document.id
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        response = client.post(f"/documents/{document_id}/extract")
+    assert response.status_code == 200
+    assert response.json()["processing_status"] == "failed"
+    with SessionLocal() as db:
+        stored = db.get(Document, document_id)
+        assert stored is not None
+        assert stored.processing_error == "PDF extraction failed"
+        assert (
+            db.scalar(
+                select(DocumentPage).where(DocumentPage.document_id == document_id)
+            )
+            is None
+        )
+
+
+def test_extract_other_organization_does_not_mutate_document(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
+    _, email = document_user
+    other_id = uuid.uuid4()
+    key = str(uuid.uuid4())
+    (storage / key).write_bytes(b"%PDF-broken")
+    with SessionLocal() as db:
+        db.add(Organization(id=other_id, name="Other", slug=f"other-{other_id}"))
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        document = Document(
+            organization_id=other_id,
+            uploaded_by_user_id=user_id,
+            filename="other.pdf",
+            content_type="application/pdf",
+            byte_size=11,
+            storage_key=key,
+        )
+        db.add(document)
+        db.commit()
+        document_id = document.id
+    try:
+        with TestClient(app) as client:
+            client.post("/auth/login", json={"email": email, "password": PASSWORD})
+            assert client.post(f"/documents/{document_id}/extract").status_code == 403
+        with SessionLocal() as db:
+            stored = db.get(Document, document_id)
+            assert stored is not None and stored.processing_status.value == "pending"
+            assert (
+                db.scalar(
+                    select(DocumentPage).where(DocumentPage.document_id == document_id)
+                )
+                is None
+            )
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(Organization).where(Organization.id == other_id))
+            db.commit()
