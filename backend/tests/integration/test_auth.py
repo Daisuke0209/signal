@@ -7,7 +7,13 @@ from sqlalchemy import delete, func, select
 
 from signal_api.database import SessionLocal
 from signal_api.main import app
-from signal_api.models import User, UserSession
+from signal_api.models import (
+    Membership,
+    MembershipRole,
+    Organization,
+    User,
+    UserSession,
+)
 from signal_api.security import hash_password, hash_session_token
 
 TEST_PASSWORD = "integration-test-password"
@@ -130,7 +136,79 @@ def test_get_me_returns_authenticated_user(
         "id": str(user_id),
         "name": "Login Test User",
         "email": email,
+        "organizations": [],
     }
+
+
+def test_get_me_returns_only_the_current_users_organizations(
+    login_user: tuple[uuid.UUID, str],
+) -> None:
+    user_id, email = login_user
+    other_user_id = uuid.uuid4()
+    organization_slug = f"current-user-organization-{uuid.uuid4()}"
+    other_organization_slug = f"other-user-organization-{uuid.uuid4()}"
+
+    with SessionLocal() as db:
+        organization = Organization(
+            name="Current User Organization",
+            slug=organization_slug,
+        )
+        other_organization = Organization(
+            name="Other User Organization",
+            slug=other_organization_slug,
+        )
+        other_user = User(
+            id=other_user_id,
+            name="Other User",
+            email=f"other-user-{uuid.uuid4()}@signal.local",
+            password_hash=hash_password(TEST_PASSWORD),
+        )
+        db.add_all([organization, other_organization, other_user])
+        db.flush()
+        db.add_all(
+            [
+                Membership(
+                    organization_id=organization.id,
+                    user_id=user_id,
+                    role=MembershipRole.MANAGER,
+                ),
+                Membership(
+                    organization_id=other_organization.id,
+                    user_id=other_user_id,
+                    role=MembershipRole.ADMIN,
+                ),
+            ]
+        )
+        db.commit()
+        organization_id = organization.id
+        other_organization_id = other_organization.id
+
+    try:
+        with TestClient(app) as client:
+            login_response = client.post(
+                "/auth/login",
+                json={"email": email, "password": TEST_PASSWORD},
+            )
+            response = client.get("/auth/me")
+
+        assert login_response.status_code == 204
+        assert response.status_code == 200
+        assert response.json()["organizations"] == [
+            {
+                "id": str(organization_id),
+                "name": "Current User Organization",
+                "slug": organization_slug,
+                "role": "manager",
+            }
+        ]
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(User).where(User.id == other_user_id))
+            db.execute(delete(Organization).where(Organization.id == organization_id))
+            db.execute(
+                delete(Organization).where(Organization.id == other_organization_id)
+            )
+            db.commit()
 
 
 def test_get_me_rejects_missing_cookie() -> None:

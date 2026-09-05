@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from signal_api.database import get_db_session
-from signal_api.models import User
+from signal_api.models import Membership, MembershipRole, Organization, User
 from signal_api.security import verify_password
 from signal_api.session_store import create_session, delete_session, get_valid_session
 
@@ -28,6 +28,14 @@ class CurrentUserResponse(BaseModel):
     id: uuid.UUID
     name: str
     email: str
+    organizations: list["CurrentUserOrganizationResponse"]
+
+
+class CurrentUserOrganizationResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    slug: str
+    role: MembershipRole
 
 
 def authentication_required() -> HTTPException:
@@ -91,11 +99,30 @@ def login(
 
 
 @router.get("/me", response_model=CurrentUserResponse)
-def get_me(current_user: CurrentUser) -> CurrentUserResponse:
+def get_me(
+    db: DatabaseSession,
+    current_user: CurrentUser,
+) -> CurrentUserResponse:
+    organizations = db.execute(
+        select(Organization, Membership.role)
+        .join(Membership, Membership.organization_id == Organization.id)
+        .where(Membership.user_id == current_user.id)
+        .order_by(Organization.name, Organization.id)
+    ).all()
+
     return CurrentUserResponse(
         id=current_user.id,
         name=current_user.name,
         email=current_user.email,
+        organizations=[
+            CurrentUserOrganizationResponse(
+                id=organization.id,
+                name=organization.name,
+                slug=organization.slug,
+                role=role,
+            )
+            for organization, role in organizations
+        ],
     )
 
 
