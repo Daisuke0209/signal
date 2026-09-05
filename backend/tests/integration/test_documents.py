@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -97,6 +98,75 @@ def test_document_upload_persists_authorized_pdf(
         )
     assert document is not None
     assert document.organization_id == organization_id
+
+
+def test_list_documents_is_organization_scoped(
+    document_user: tuple[uuid.UUID, str],
+) -> None:
+    organization_id, email = document_user
+    with TestClient(app) as client:
+        assert (
+            client.get(f"/documents?organization_id={organization_id}").status_code
+            == 401
+        )
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        response = client.get(f"/documents?organization_id={organization_id}")
+        denied = client.get(f"/documents?organization_id={uuid.uuid4()}")
+    assert response.status_code == 200
+    assert response.json() == []
+    assert denied.status_code == 403
+
+
+def test_list_documents_returns_metadata_newest_first(
+    document_user: tuple[uuid.UUID, str],
+) -> None:
+    organization_id, email = document_user
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        other = Organization(name="Other", slug=f"other-{uuid.uuid4()}")
+        db.add(other)
+        db.flush()
+        older = datetime.now(UTC) - timedelta(minutes=1)
+        db.add_all(
+            [
+                Document(
+                    organization_id=organization_id,
+                    uploaded_by_user_id=user_id,
+                    filename="old.pdf",
+                    content_type="application/pdf",
+                    byte_size=1,
+                    storage_key=str(uuid.uuid4()),
+                    created_at=older,
+                ),
+                Document(
+                    organization_id=other.id,
+                    uploaded_by_user_id=user_id,
+                    filename="other.pdf",
+                    content_type="application/pdf",
+                    byte_size=1,
+                    storage_key=str(uuid.uuid4()),
+                ),
+                Document(
+                    organization_id=organization_id,
+                    uploaded_by_user_id=user_id,
+                    filename="failed.pdf",
+                    content_type="application/pdf",
+                    byte_size=1,
+                    storage_key=str(uuid.uuid4()),
+                    processing_status="failed",
+                    processing_error="PDF extraction failed",
+                ),
+            ]
+        )
+        db.commit()
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        response = client.get(f"/documents?organization_id={organization_id}")
+    assert response.status_code == 200
+    rows = response.json()
+    assert [row["filename"] for row in rows] == ["failed.pdf", "old.pdf"]
+    assert rows[0]["processing_error"] == "PDF extraction failed"
+    assert rows[0]["uploaded_by_name"] == "Documents"
 
 
 def test_document_upload_rejects_authenticated_nonmember(
