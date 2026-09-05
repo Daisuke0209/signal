@@ -24,6 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql+psycopg://signal:signal@localhost:5432/signal
+      SEED_DEMO_PASSWORD: ci-demo-password
 
     services:
       postgres:
