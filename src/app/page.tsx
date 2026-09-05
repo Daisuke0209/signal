@@ -482,6 +482,7 @@ export default function Home() {
           </span>
           Signal
         </div>
+        <Link className={styles.documentsLink} href="/history">商談履歴</Link>
         <Link className={styles.documentsLink} href="/documents">
           資料を管理
         </Link>

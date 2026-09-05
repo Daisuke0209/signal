@@ -662,10 +662,11 @@ describe("authentication page", () => {
     render(<Home />);
 
     await screen.findByText("進行中の商談");
+    await waitFor(() => expect(suggestionMocks.connect).toHaveBeenCalledOnce());
     fireEvent.click(screen.getByRole("button", { name: "ログアウト" }));
 
     await screen.findByRole("heading", { name: "Signalにログイン" });
-    expect(closeEvents).toHaveBeenCalledOnce();
+    await waitFor(() => expect(closeEvents).toHaveBeenCalledOnce());
   });
 
   it("returns to login without reconnecting after suggestion access is revoked", async () => {
