@@ -17,6 +17,7 @@ from signal_api.conversations import router as conversations_router
 from signal_api.database import get_db_session
 from signal_api.documents import router as documents_router
 from signal_api.domain_traces import configure_domain_logging
+from signal_api.handoffs import router as handoffs_router
 from signal_api.observability import (
     RequestLoggingMiddleware,
     configure_request_logging,
@@ -64,6 +65,7 @@ app.include_router(auth_router)
 app.include_router(approvals_router)
 app.include_router(conversations_router)
 app.include_router(documents_router)
+app.include_router(handoffs_router)
 app.include_router(suggestions_router)
 app.include_router(suggestion_stream_router)
 app.include_router(transcription_router)
