@@ -553,7 +553,14 @@ export default function Home() {
             </h1>
           </div>
           <div className={styles.audioControls}>
-            {conversation && <ConversationDocuments key={conversation.id} conversationId={conversation.id} organizationId={conversation.organization_id} ended={conversation.status === "ended"} />}
+            {conversation && (
+              <ConversationDocuments
+                conversationId={conversation.id}
+                ended={conversation.status === "ended"}
+                key={`${conversation.id}:${conversation.organization_id}`}
+                organizationId={conversation.organization_id}
+              />
+            )}
             <span
               className={styles.captureStatus}
               data-active={isCapturing}
