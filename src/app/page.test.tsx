@@ -713,6 +713,40 @@ describe("authentication page", () => {
     expect(suggestionMocks.connect).toHaveBeenCalledOnce();
   });
 
+  it("rechecks authorization after a network error and later expires", async () => {
+    const detail = {
+      id: "conversation-1",
+      organization_id: "org-1",
+      created_by_user_id: currentUser.id,
+      status: "active",
+      created_at: "2026-09-05T12:00:00Z",
+      participants: [],
+      messages: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(userResponse())
+        .mockResolvedValueOnce(jsonResponse([detail]))
+        .mockResolvedValueOnce(jsonResponse(detail))
+        .mockRejectedValueOnce(new TypeError("network"))
+        .mockResolvedValueOnce(emptyResponse(401)),
+    );
+    render(<Home />);
+    await screen.findByText("進行中の商談");
+    const onConnectionError = suggestionMocks.connect.mock.calls[0][2] as () => void;
+
+    onConnectionError();
+    await screen.findByText("提案の接続が切れています");
+    await Promise.resolve();
+    onConnectionError();
+
+    expect(
+      await screen.findByRole("heading", { name: "Signalにログイン" }),
+    ).toBeDefined();
+  });
+
   it("keeps the workspace visible when selecting a conversation fails", async () => {
     const list = [
       {
