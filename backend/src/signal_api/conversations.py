@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from signal_api.auth import CurrentUser
@@ -12,10 +12,13 @@ from signal_api.config import get_settings
 from signal_api.database import get_db_session
 from signal_api.models import (
     Conversation,
+    ConversationDocument,
     ConversationMessage,
     ConversationParticipant,
     ConversationParticipantSide,
     ConversationStatus,
+    Document,
+    DocumentProcessingStatus,
     Membership,
 )
 from signal_api.suggestion_events import events
@@ -36,6 +39,15 @@ class ConversationResponse(BaseModel):
     created_by_user_id: uuid.UUID
     status: ConversationStatus
     created_at: datetime
+
+
+class ConversationDocumentsRequest(BaseModel):
+    document_ids: list[uuid.UUID] = Field(max_length=100)
+
+
+class ConversationDocumentResponse(BaseModel):
+    id: uuid.UUID
+    filename: str
 
 
 class ConversationListItemResponse(BaseModel):
@@ -228,6 +240,120 @@ def get_conversation(
             for message, participant in message_rows
         ],
     )
+
+
+def _authorized_conversation(
+    conversation_id: uuid.UUID, user_id: uuid.UUID, db: Session, lock: bool = False
+) -> Conversation:
+    statement = select(Conversation).where(Conversation.id == conversation_id)
+    conversation = db.scalar(statement.with_for_update() if lock else statement)
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if (
+        db.get(
+            Membership,
+            {"organization_id": conversation.organization_id, "user_id": user_id},
+        )
+        is None
+    ):
+        raise HTTPException(status_code=403, detail="Not a member of this organization")
+    return conversation
+
+
+@router.get(
+    "/{conversation_id}/documents", response_model=list[ConversationDocumentResponse]
+)
+def list_conversation_documents(
+    conversation_id: uuid.UUID, db: DatabaseSession, current_user: CurrentUser
+) -> list[ConversationDocumentResponse]:
+    conversation = _authorized_conversation(conversation_id, current_user.id, db)
+    return [
+        ConversationDocumentResponse(id=document.id, filename=document.filename)
+        for document in db.scalars(
+            select(Document)
+            .join(ConversationDocument)
+            .where(ConversationDocument.conversation_id == conversation.id)
+            .order_by(Document.filename, Document.id)
+        ).all()
+    ]
+
+
+@router.put(
+    "/{conversation_id}/documents", response_model=list[ConversationDocumentResponse]
+)
+def replace_conversation_documents(
+    conversation_id: uuid.UUID,
+    request: ConversationDocumentsRequest,
+    db: DatabaseSession,
+    current_user: CurrentUser,
+) -> list[ConversationDocumentResponse]:
+    conversation = _authorized_conversation(
+        conversation_id, current_user.id, db, lock=True
+    )
+    if conversation.status is ConversationStatus.ENDED:
+        raise HTTPException(status_code=409, detail="Conversation has ended")
+    ids = set(request.document_ids)
+    documents = (
+        list(db.scalars(select(Document).where(Document.id.in_(ids))).all())
+        if ids
+        else []
+    )
+    if len(documents) != len(ids) or any(
+        d.organization_id != conversation.organization_id
+        or d.processing_status is not DocumentProcessingStatus.READY
+        for d in documents
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Documents must be ready and belong to this organization",
+        )
+    current_ids = set(
+        db.scalars(
+            select(ConversationDocument.document_id).where(
+                ConversationDocument.conversation_id == conversation.id
+            )
+        )
+    )
+    if current_ids == ids:
+        return [
+            ConversationDocumentResponse(id=document.id, filename=document.filename)
+            for document in sorted(
+                documents, key=lambda document: (document.filename, document.id)
+            )
+        ]
+    db.execute(
+        delete(ConversationDocument).where(
+            ConversationDocument.conversation_id == conversation.id
+        )
+    )
+    db.add_all(
+        [
+            ConversationDocument(
+                conversation_id=conversation.id, document_id=document.id
+            )
+            for document in documents
+        ]
+    )
+    run = (
+        queue_suggestion_run(db, conversation.id)
+        if get_settings().suggestions_enabled
+        and db.scalar(
+            select(func.max(ConversationMessage.sequence_number)).where(
+                ConversationMessage.conversation_id == conversation.id
+            )
+        )
+        is not None
+        else None
+    )
+    db.commit()
+    if run:
+        events.queued(conversation.id, run.id, run.generation)
+    return [
+        ConversationDocumentResponse(id=document.id, filename=document.filename)
+        for document in sorted(
+            documents, key=lambda document: (document.filename, document.id)
+        )
+    ]
 
 
 @router.post(
