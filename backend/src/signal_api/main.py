@@ -11,10 +11,16 @@ from signal_api.config import get_settings
 from signal_api.conversations import router as conversations_router
 from signal_api.database import get_db_session
 from signal_api.documents import router as documents_router
+from signal_api.observability import (
+    RequestLoggingMiddleware,
+    configure_request_logging,
+)
 
 settings = get_settings()
 
+configure_request_logging()
 app = FastAPI(title="Signal API")
+app.add_middleware(RequestLoggingMiddleware)
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(documents_router)
@@ -25,6 +31,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Request-ID"],
 )
 
 DatabaseSession = Annotated[Session, Depends(get_db_session)]

@@ -155,3 +155,19 @@ uv run --directory backend alembic -c alembic.ini revision --autogenerate -m "de
 | `npm run db:check-schema` | モデルと適用済みスキーマの差分を確認する |
 | `npm run db:check` | PythonからPostgreSQLへの接続を確認する |
 | `npm run db:seed` | デモデータを投入する |
+
+## HTTPリクエストのログ
+
+APIレスポンスの `X-Request-ID` と標準エラー出力のJSONログを照合できます。
+UUID形式の `X-Request-ID` を渡すと引き継ぎ、未指定・不正形式ならサーバーで生成します。
+リクエストIDは認証や認可には利用しません。ブラウザからもレスポンスヘッダーを読めます。
+
+ログには日時、HTTPメソッド、ルートのテンプレート、ステータス、処理時間、例外の型を記録します。
+URLのクエリ・実際のパス引数・Cookie・Authorization・本文・例外メッセージは記録しません。
+未処理例外は相関ID付きの安全な500レスポンスにします。ストリーミング開始後の例外は
+レスポンスを書き換えず、エラーとして記録して上位へ伝えます。
+
+ミドルウェアはHTTPの本文をバッファせずに転送するpure ASGI実装です。
+`request_id_context` をPythonの処理境界で参照でき、並行リクエストのIDは分離されます。
+WebSocketや資料検索・提案・承認の詳細なトレースは、それぞれの機能境界で追加します。
+参照: [Starlette middleware](https://starlette.dev/middleware/)
