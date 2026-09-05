@@ -12,7 +12,7 @@
 .workspace > header { height: 58px; padding: 0 24px; display: flex; gap: 18px; align-items: center; border-bottom: 1px solid var(--border); }
 .workspace > header span { color: var(--text-muted); font-size: 13px; margin-right: auto; }
 .workspace button { cursor: pointer; }
-.columns { min-height: calc(100vh - 58px); display: grid; grid-template-columns: 220px minmax(420px, 1fr) 310px; }
+.columns { min-height: calc(100vh - 58px); display: grid; grid-template-columns: 220px minmax(0, 1fr) minmax(0, 1fr); }
 .columns > aside, .transcript { padding: 22px; border-right: 1px solid var(--border); }
 .columns > aside:first-child > button { width: 100%; text-align: left; padding: 12px; margin-top: 8px; background: transparent; border: 0; border-radius: 7px; color: var(--text-secondary); }
 .columns > aside:first-child > button.active { background: var(--accent-soft); color: var(--accent); }
