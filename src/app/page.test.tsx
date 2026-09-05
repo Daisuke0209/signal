@@ -33,6 +33,13 @@ function conversationsResponse(): Response {
   });
 }
 
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -44,10 +51,48 @@ describe("authentication page", () => {
       .fn()
       .mockResolvedValueOnce(userResponse())
       .mockResolvedValueOnce(
-        new Response(JSON.stringify([{ id: "conversation-1", organization_id: "org-1", status: "active", created_at: "2026-09-05T12:00:00Z" }]), { status: 200 }),
+        new Response(
+          JSON.stringify([
+            {
+              id: "conversation-1",
+              organization_id: "org-1",
+              status: "active",
+              created_at: "2026-09-05T12:00:00Z",
+            },
+          ]),
+          { status: 200 },
+        ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: "conversation-1", organization_id: "org-1", created_by_user_id: "user-1", status: "active", created_at: "2026-09-05T12:00:00Z", participants: [], messages: [{ id: "message-1", participant_id: "participant-1", speaker_label: "通話相手", side: "customer", sequence_number: 1, content: "最初の発言" }, { id: "message-2", participant_id: "participant-2", speaker_label: "自分", side: "sales_rep", sequence_number: 2, content: "次の発言" }] }), { status: 200 }),
+        new Response(
+          JSON.stringify({
+            id: "conversation-1",
+            organization_id: "org-1",
+            created_by_user_id: "user-1",
+            status: "active",
+            created_at: "2026-09-05T12:00:00Z",
+            participants: [],
+            messages: [
+              {
+                id: "message-1",
+                participant_id: "participant-1",
+                speaker_label: "通話相手",
+                side: "customer",
+                sequence_number: 1,
+                content: "最初の発言",
+              },
+              {
+                id: "message-2",
+                participant_id: "participant-2",
+                speaker_label: "自分",
+                side: "sales_rep",
+                sequence_number: 2,
+                content: "次の発言",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -60,6 +105,153 @@ describe("authentication page", () => {
       "http://localhost:8000/conversations/conversation-1",
       expect.objectContaining({ credentials: "include" }),
     );
+  });
+
+  it("creates a conversation with the server-provided organization", async () => {
+    const userWithOrganization = {
+      ...currentUser,
+      organizations: [
+        {
+          id: "org-1",
+          name: "Signal Demo",
+          slug: "signal-demo",
+          role: "admin",
+        },
+      ],
+    };
+    const created = {
+      id: "conversation-2",
+      organization_id: "org-1",
+      status: "active",
+      created_at: "2026-09-05T12:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(userWithOrganization))
+      .mockResolvedValueOnce(conversationsResponse())
+      .mockResolvedValueOnce(jsonResponse(created))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ...created,
+          created_by_user_id: currentUser.id,
+          participants: [],
+          messages: [],
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+
+    await screen.findByText("Demo User");
+    fireEvent.click(screen.getByRole("button", { name: "新規作成" }));
+
+    await screen.findByText("最初の発言を追加してください。");
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8000/conversations",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ organization_id: "org-1" }),
+      }),
+    );
+  });
+
+  it("refreshes the transcript after adding a customer message", async () => {
+    const detail = {
+      id: "conversation-1",
+      organization_id: "org-1",
+      created_by_user_id: currentUser.id,
+      status: "active",
+      created_at: "2026-09-05T12:00:00Z",
+      participants: [],
+      messages: [],
+    };
+    const refreshed = {
+      ...detail,
+      messages: [
+        {
+          id: "message-3",
+          participant_id: "participant-1",
+          speaker_label: "通話相手",
+          side: "customer",
+          sequence_number: 1,
+          content: "顧客の発言",
+        },
+      ],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(userResponse())
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: detail.id,
+            organization_id: detail.organization_id,
+            status: detail.status,
+            created_at: detail.created_at,
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(jsonResponse(detail))
+      .mockResolvedValueOnce(jsonResponse(refreshed.messages[0]))
+      .mockResolvedValueOnce(jsonResponse(refreshed));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+
+    await screen.findByText("最初の発言を追加してください。");
+    fireEvent.change(screen.getByLabelText("話者"), {
+      target: { value: "customer" },
+    });
+    fireEvent.change(screen.getByLabelText("発言"), {
+      target: { value: "顧客の発言" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "追加" }));
+
+    expect(await screen.findByText("顧客の発言")).toBeDefined();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "http://localhost:8000/conversations/conversation-1/messages",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("keeps the workspace visible when selecting a conversation fails", async () => {
+    const list = [
+      {
+        id: "conversation-1",
+        organization_id: "org-1",
+        status: "active",
+        created_at: "2026-09-05T12:00:00Z",
+      },
+      {
+        id: "conversation-2",
+        organization_id: "org-1",
+        status: "active",
+        created_at: "2026-09-05T12:01:00Z",
+      },
+    ];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(userResponse())
+      .mockResolvedValueOnce(jsonResponse(list))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ...list[0],
+          created_by_user_id: currentUser.id,
+          participants: [],
+          messages: [],
+        }),
+      )
+      .mockResolvedValueOnce(emptyResponse(500));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+
+    await screen.findByText("進行中の商談");
+    fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+
+    expect(
+      await screen.findByText("会話を読み込めませんでした。"),
+    ).toBeDefined();
+    expect(screen.getByText("営業支援")).toBeDefined();
   });
 
   it("restores an existing session", async () => {
@@ -126,7 +318,9 @@ describe("authentication page", () => {
     fireEvent.click(screen.getByRole("button", { name: "ログイン" }));
 
     expect(
-      await screen.findByText("メールアドレスまたはパスワードが正しくありません。"),
+      await screen.findByText(
+        "メールアドレスまたはパスワードが正しくありません。",
+      ),
     ).toBeDefined();
   });
 
