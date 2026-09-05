@@ -662,10 +662,11 @@ describe("authentication page", () => {
     render(<Home />);
 
     await screen.findByText("進行中の商談");
+    await waitFor(() => expect(suggestionMocks.connect).toHaveBeenCalledOnce());
     fireEvent.click(screen.getByRole("button", { name: "ログアウト" }));
 
     await screen.findByRole("heading", { name: "Signalにログイン" });
-    expect(closeEvents).toHaveBeenCalledOnce();
+    await waitFor(() => expect(closeEvents).toHaveBeenCalledOnce());
   });
 
   it("returns to login without reconnecting after suggestion access is revoked", async () => {
@@ -700,6 +701,7 @@ describe("authentication page", () => {
     render(<Home />);
 
     await screen.findByText("進行中の商談");
+    await waitFor(() => expect(suggestionMocks.connect).toHaveBeenCalledOnce());
     const onAccessRevoked = suggestionMocks.connect.mock.calls[0][3] as () => void;
     onAccessRevoked();
 
@@ -709,7 +711,7 @@ describe("authentication page", () => {
     expect(
       screen.getByText("認証が失効しました。もう一度ログインしてください。"),
     ).toBeDefined();
-    expect(closeEvents).toHaveBeenCalledOnce();
+    await waitFor(() => expect(closeEvents).toHaveBeenCalledOnce());
     expect(suggestionMocks.connect).toHaveBeenCalledOnce();
   });
 
@@ -735,6 +737,7 @@ describe("authentication page", () => {
     );
     render(<Home />);
     await screen.findByText("進行中の商談");
+    await waitFor(() => expect(suggestionMocks.connect).toHaveBeenCalledOnce());
     const onConnectionError = suggestionMocks.connect.mock.calls[0][2] as () => void;
 
     onConnectionError();

@@ -114,3 +114,122 @@ def test_handoffs_require_an_authenticated_organization_member(
                 db.execute(
                     delete(ApprovalRequest).where(ApprovalRequest.id == approval_id)
                 )
+
+
+def test_only_one_organization_member_can_claim_a_handoff(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, owner_email = conversation_user
+    approval_id: uuid.UUID | None = None
+    helper_ids: list[uuid.UUID] = []
+    helper_emails = [
+        f"handoff-claim-a-{uuid.uuid4()}@signal.local",
+        f"handoff-claim-b-{uuid.uuid4()}@signal.local",
+    ]
+    try:
+        with SessionLocal.begin() as db:
+            for index, email in enumerate(helper_emails):
+                helper = User(
+                    name=f"Handoff Claim Helper {index}",
+                    email=email,
+                    password_hash=hash_password(TEST_PASSWORD),
+                )
+                db.add(helper)
+                db.flush()
+                helper_ids.append(helper.id)
+                db.add(Membership(organization_id=organization_id, user_id=helper.id))
+        with TestClient(app) as owner:
+            login(owner, owner_email)
+            approval_id = uuid.UUID(
+                create_approved_handoff(
+                    owner, create_conversation(owner, organization_id)
+                )
+            )
+        with TestClient(app) as first:
+            login(first, helper_emails[0])
+            assert first.post(f"/handoffs/{approval_id}/claim").status_code == 200
+        with TestClient(app) as second:
+            login(second, helper_emails[1])
+            assert second.post(f"/handoffs/{approval_id}/claim").status_code == 409
+            assert (
+                second.post(
+                    f"/handoffs/{approval_id}/respond",
+                    json={"content": "別の担当者による回答"},
+                ).status_code
+                == 409
+            )
+    finally:
+        if approval_id is not None:
+            with SessionLocal.begin() as db:
+                db.execute(
+                    delete(ApprovalRequest).where(ApprovalRequest.id == approval_id)
+                )
+        if helper_ids:
+            with SessionLocal.begin() as db:
+                db.execute(delete(User).where(User.id.in_(helper_ids)))
+
+
+def test_other_organization_cannot_read_or_act_on_handoff(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    from signal_api.models import Organization
+
+    organization_id, _, owner_email = conversation_user
+    approval_id: uuid.UUID | None = None
+    outsider_id: uuid.UUID | None = None
+    outsider_organization_id = uuid.uuid4()
+    outsider_email = f"handoff-outsider-{uuid.uuid4()}@signal.local"
+    try:
+        with SessionLocal.begin() as db:
+            outsider_organization = Organization(
+                id=outsider_organization_id,
+                name="Handoff Outsider Organization",
+                slug=f"handoff-outsider-{uuid.uuid4()}",
+            )
+            outsider = User(
+                name="Handoff Outsider",
+                email=outsider_email,
+                password_hash=hash_password(TEST_PASSWORD),
+            )
+            db.add_all([outsider_organization, outsider])
+            db.flush()
+            outsider_id = outsider.id
+            db.add(
+                Membership(
+                    organization_id=outsider_organization_id,
+                    user_id=outsider_id,
+                )
+            )
+        with TestClient(app) as owner:
+            login(owner, owner_email)
+            approval_id = uuid.UUID(
+                create_approved_handoff(
+                    owner, create_conversation(owner, organization_id)
+                )
+            )
+        with TestClient(app) as outsider:
+            login(outsider, outsider_email)
+            assert outsider.get("/handoffs").json() == []
+            assert outsider.get(f"/handoffs/{approval_id}").status_code == 403
+            assert outsider.post(f"/handoffs/{approval_id}/claim").status_code == 403
+            assert (
+                outsider.post(
+                    f"/handoffs/{approval_id}/respond",
+                    json={"content": "越権回答"},
+                ).status_code
+                == 403
+            )
+    finally:
+        if approval_id is not None:
+            with SessionLocal.begin() as db:
+                db.execute(
+                    delete(ApprovalRequest).where(ApprovalRequest.id == approval_id)
+                )
+        if outsider_id is not None:
+            with SessionLocal.begin() as db:
+                db.execute(delete(User).where(User.id == outsider_id))
+                db.execute(
+                    delete(Organization).where(
+                        Organization.id == outsider_organization_id
+                    )
+                )
