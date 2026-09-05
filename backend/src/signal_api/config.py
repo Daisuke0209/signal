@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     document_max_count_per_organization: int = 100
     document_max_pages: int = 200
     document_max_extracted_text_bytes: int = 2_000_000
+    openai_api_key: SecretStr | None = None
+    transcription_model: str = "gpt-live-transcribe"
 
     @property
     def sqlalchemy_database_url(self) -> str:
