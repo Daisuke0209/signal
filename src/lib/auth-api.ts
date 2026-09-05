@@ -101,6 +101,8 @@ export const createConversation = (organizationId: string) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ organization_id: organizationId }),
   });
+export const endConversation = (id: string) =>
+  json<Conversation>(`/conversations/${id}/end`, { method: "POST" });
 export const addMessage = (
   id: string,
   message: {

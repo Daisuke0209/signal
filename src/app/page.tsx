@@ -8,6 +8,7 @@ import {
   ConversationDetail,
   createConversation,
   CurrentUser,
+  endConversation,
   getConversation,
   getCurrentUser,
   listConversations,
@@ -211,15 +212,18 @@ export default function Home() {
       setBusy(false);
     }
   }
-  async function finishCapture() {
-    if (!live.current || isStopping) return;
+  async function finishCapture(): Promise<boolean> {
+    if (!live.current) return true;
+    if (isStopping) return false;
     const generation = captureGeneration.current;
     setIsStopping(true);
     setCaptureState("最後の発言を保存中…");
     try {
       await live.current.stop();
+      return true;
     } catch {
       if (captureGeneration.current === generation) setError(transcriptionError("stop_failed"));
+      return false;
     } finally {
       if (captureGeneration.current === generation) stopCapture();
     }
@@ -367,6 +371,32 @@ export default function Home() {
       setConversation(await getConversation(conversation.id));
     } catch {
       setError("発言を追加できませんでした。");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function end() {
+    if (!conversation || conversation.status !== "active") return;
+    setBusy(true);
+    setError("");
+    try {
+      if (isCapturing && !(await finishCapture())) {
+        setError("音声の確定に失敗しました。商談は進行中のまま、もう一度お試しください。");
+        return;
+      }
+      const ended = await endConversation(conversation.id);
+      stopCapture();
+      setShowManualInput(false);
+      setConversation((current) =>
+        current?.id === ended.id ? { ...current, status: "ended" } : current,
+      );
+      setItems((current) =>
+        current.map((item) =>
+          item.id === ended.id ? { ...item, status: "ended" } : item,
+        ),
+      );
+    } catch {
+      setError("商談を終了できませんでした。進行中のまま、もう一度お試しください。");
     } finally {
       setBusy(false);
     }
@@ -528,8 +558,22 @@ export default function Home() {
                 Meet音声とマイクを取得
               </button>
             )}
+            {conversation?.status === "active" && (
+              <button
+                className={styles.endButton}
+                disabled={busy}
+                onClick={() => void end()}
+              >
+                商談を終了
+              </button>
+            )}
           </div>
         </header>
+        {conversation?.status === "ended" && (
+          <p className={styles.endedNotice} role="status">
+            この商談は終了しました。文字起こしと発言の追加はできません。
+          </p>
+        )}
         {error && (
           <p className={styles.error} role="alert">
             {error}

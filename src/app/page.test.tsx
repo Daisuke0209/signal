@@ -747,6 +747,54 @@ describe("authentication page", () => {
     ).toBeDefined();
   });
 
+  it("waits for live audio to flush before ending and keeps retry available on flush failure", async () => {
+    let resolveStop: (() => void) | undefined;
+    liveMocks.stop.mockImplementationOnce(
+      () => new Promise<void>((resolve) => { resolveStop = resolve; }),
+    );
+    const track = { stop: vi.fn(), addEventListener: vi.fn() } as unknown as MediaStreamTrack;
+    audioMocks.start.mockResolvedValue({
+      displayStream: { getTracks: () => [track], getAudioTracks: () => [track] },
+      microphoneStream: { getTracks: () => [track], getAudioTracks: () => [track] },
+    });
+    const detail = { id: "conversation-1", organization_id: "org-1", created_by_user_id: currentUser.id, status: "active", created_at: "2026-09-05T12:00:00Z", participants: [], messages: [] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(userResponse())
+      .mockResolvedValueOnce(jsonResponse([detail]))
+      .mockResolvedValueOnce(jsonResponse(detail))
+      .mockResolvedValueOnce(jsonResponse({ ...detail, status: "ended" }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+    await screen.findByText("進行中の商談");
+    fireEvent.click(screen.getByRole("button", { name: "Meet音声とマイクを取得" }));
+    await screen.findByText("文字起こし中");
+    fireEvent.click(screen.getByRole("button", { name: "商談を終了" }));
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    resolveStop?.();
+    await screen.findByText("この商談は終了しました。文字起こしと発言の追加はできません。");
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("does not end the conversation when live audio flush fails", async () => {
+    liveMocks.stop.mockRejectedValueOnce(new Error("flush"));
+    const track = { stop: vi.fn(), addEventListener: vi.fn() } as unknown as MediaStreamTrack;
+    audioMocks.start.mockResolvedValue({
+      displayStream: { getTracks: () => [track], getAudioTracks: () => [track] },
+      microphoneStream: { getTracks: () => [track], getAudioTracks: () => [track] },
+    });
+    const detail = { id: "conversation-1", organization_id: "org-1", created_by_user_id: currentUser.id, status: "active", created_at: "2026-09-05T12:00:00Z", participants: [], messages: [] };
+    const fetchMock = vi.fn().mockResolvedValueOnce(userResponse()).mockResolvedValueOnce(jsonResponse([detail])).mockResolvedValueOnce(jsonResponse(detail));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+    await screen.findByText("進行中の商談");
+    fireEvent.click(screen.getByRole("button", { name: "Meet音声とマイクを取得" }));
+    await screen.findByText("文字起こし中");
+    fireEvent.click(screen.getByRole("button", { name: "商談を終了" }));
+    expect(await screen.findByText("音声の確定に失敗しました。商談は進行中のまま、もう一度お試しください。")).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(screen.getByRole("button", { name: "商談を終了" })).toHaveProperty("disabled", false);
+  });
+
   it("keeps the workspace visible when selecting a conversation fails", async () => {
     const list = [
       {
