@@ -19,10 +19,81 @@ import {
   startAudioCapture,
   stopStream,
 } from "@/lib/audio-capture";
-import { LiveTranscription, TranscriptEvent, startLiveTranscription, transcriptionError } from "@/lib/live-transcription";
+import {
+  LiveTranscription,
+  TranscriptEvent,
+  startLiveTranscription,
+  transcriptionError,
+} from "@/lib/live-transcription";
+import {
+  connectSuggestionEvents,
+  getLatestSuggestions,
+  Suggestion,
+  SuggestionKind,
+  SuggestionRun,
+  SuggestionState,
+} from "@/lib/suggestions-api";
 import styles from "./page.module.css";
 
 const DEMO_EMAIL = "demo@signal.local";
+
+function suggestionsFor(run: SuggestionRun | null, kind: SuggestionKind): Suggestion[] {
+  return run?.suggestions.filter((suggestion) => suggestion.kind === kind) ?? [];
+}
+
+function suggestionStatus(run: SuggestionRun | null, connectionError: boolean): string {
+  if (connectionError) return "提案の接続が切れています";
+  if (run?.status === "queued") return "提案を準備中";
+  if (run?.status === "running") {
+    return run.phase === "searching" ? "資料を調査中" : "提案を生成中";
+  }
+  if (run?.status === "failed") return "提案を生成できませんでした";
+  return "提案を待機中";
+}
+
+function isOlderSuggestionRun(
+  candidate: SuggestionRun | null,
+  current: SuggestionRun | null,
+): boolean {
+  if (candidate === null) return current !== null;
+  if (current === null) return false;
+  return (
+    candidate.generation < current.generation ||
+    (candidate.generation === current.generation &&
+      candidate.revision < current.revision)
+  );
+}
+
+function SuggestionItems({ suggestions }: { suggestions: Suggestion[] }) {
+  if (!suggestions.length) {
+    return <p className={styles.suggestionHint}>まだ提案はありません。</p>;
+  }
+
+  return (
+    <div className={styles.suggestionItems}>
+      {suggestions.map((suggestion) => (
+        <article className={styles.suggestionItem} key={suggestion.id}>
+          <p>{suggestion.content}</p>
+          {suggestion.sources.length ? (
+            <div className={styles.sources}>
+              {suggestion.sources.map((source) => (
+                <details
+                  className={styles.source}
+                  key={`${source.document_id}:${source.page_number}:${source.excerpt}`}
+                >
+                  <summary>{source.document_name} · p.{source.page_number}</summary>
+                  <p>{source.excerpt}</p>
+                </details>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.noSources}>根拠なし</p>
+          )}
+        </article>
+      ))}
+    </div>
+  );
+}
 
 export default function Home() {
   const [user, setUser] = useState<CurrentUser | null>(null),
@@ -46,6 +117,11 @@ export default function Home() {
   const [showManualInput, setShowManualInput] = useState(false);
   const [captureState, setCaptureState] = useState("停止中");
   const [isCapturing, setIsCapturing] = useState(false);
+  const [suggestionRun, setSuggestionRun] = useState<SuggestionRun | null>(
+    null,
+  );
+  const [suggestionConnectionError, setSuggestionConnectionError] =
+    useState(false);
   function stopCapture() {
     captureGeneration.current += 1;
     liveAbort.current?.abort();
@@ -101,6 +177,8 @@ export default function Home() {
           });
           if (update.type === "final" && update.message) {
             const message = update.message;
+            setSuggestionRun(null);
+            setSuggestionConnectionError(false);
             setConversation((old) => old?.id === conversation.id ? {
               ...old, messages: [...old.messages.filter((m) => m.id !== message.id), message]
                 .sort((a, b) => a.sequence_number - b.sequence_number),
@@ -147,6 +225,48 @@ export default function Home() {
     }
   }
   useEffect(() => () => stopCapture(), []);
+  const conversationId = conversation?.id;
+  useEffect(() => {
+    if (!user || !conversationId) return;
+
+    let active = true;
+    const applyState = (state: SuggestionState) => {
+      if (!active || state.conversation_id !== conversationId) return;
+      setSuggestionConnectionError(false);
+      setSuggestionRun((current) =>
+        isOlderSuggestionRun(state.latest_run, current)
+          ? current
+          : state.latest_run,
+      );
+    };
+    const handleConnectionError = () => {
+      if (active) setSuggestionConnectionError(true);
+    };
+    const handleAccessRevoked = () => {
+      if (!active) return;
+      stopCapture();
+      setSuggestionRun(null);
+      setSuggestionConnectionError(false);
+      setConversation(null);
+      setItems([]);
+      setUser(null);
+      setError("認証が失効しました。もう一度ログインしてください。");
+    };
+    void getLatestSuggestions(conversationId)
+      .then(applyState)
+      .catch(handleConnectionError);
+
+    const closeEvents = connectSuggestionEvents(
+      conversationId,
+      applyState,
+      handleConnectionError,
+      handleAccessRevoked,
+    );
+    return () => {
+      active = false;
+      closeEvents();
+    };
+  }, [conversationId, user]);
   async function load() {
     const conversations = await listConversations();
     setItems(conversations);
@@ -187,6 +307,8 @@ export default function Home() {
   async function select(id: string) {
     stopCapture();
     setShowManualInput(false);
+    setSuggestionRun(null);
+    setSuggestionConnectionError(false);
     setBusy(true);
     try {
       setConversation(await getConversation(id));
@@ -206,6 +328,8 @@ export default function Home() {
       const created = await createConversation(user.organizations[0].id);
       stopCapture();
       setShowManualInput(false);
+      setSuggestionRun(null);
+      setSuggestionConnectionError(false);
       setItems((old) => [created, ...old]);
       setConversation(await getConversation(created.id));
     } catch {
@@ -225,6 +349,8 @@ export default function Home() {
         content,
       });
       setContent("");
+      setSuggestionRun(null);
+      setSuggestionConnectionError(false);
       setConversation(await getConversation(conversation.id));
     } catch {
       setError("発言を追加できませんでした。");
@@ -502,30 +628,40 @@ export default function Home() {
               <div>
                 <h2 id="assist-title">営業支援</h2>
               </div>
-              <span className={styles.assistLabel}>提案を待機中</span>
+              <span
+                aria-live="polite"
+                className={styles.assistLabel}
+                data-state={suggestionRun?.status ?? "idle"}
+              >
+                {suggestionStatus(suggestionRun, suggestionConnectionError)}
+              </span>
             </div>
             <section className={styles.nextQuestion}>
               <div className={styles.suggestionHeading}>
                 <span aria-hidden="true">↗</span>
                 <h3>次に聞くこと</h3>
               </div>
-              <p className={styles.suggestionHint}>
-                会話に合わせた質問を表示します。
-              </p>
+              <SuggestionItems
+                suggestions={suggestionsFor(suggestionRun, "question")}
+              />
             </section>
             <section className={styles.suggestionSection}>
               <div className={styles.suggestionHeading}>
                 <span aria-hidden="true">↳</span>
                 <h3>返答例</h3>
               </div>
-              <p>会話の流れに沿った返答を表示します。</p>
+              <SuggestionItems
+                suggestions={suggestionsFor(suggestionRun, "response")}
+              />
             </section>
             <section className={styles.suggestionSection}>
               <div className={styles.suggestionHeading}>
                 <span aria-hidden="true">✓</span>
                 <h3>確認事項</h3>
               </div>
-              <p>確認が必要な条件や、未解決の論点を表示します。</p>
+              <SuggestionItems
+                suggestions={suggestionsFor(suggestionRun, "confirmation")}
+              />
             </section>
           </aside>
         </div>
