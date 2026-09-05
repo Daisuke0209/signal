@@ -1103,6 +1103,7 @@ it("discards delayed approvals from a conversation that was switched away from",
   await screen.findByText("進行中の商談");
   resolveApprovals?.(jsonResponse([{ id: "old", conversation_id: first.id, operation: "internal_handoff", target: "営業支援", input: { summary: "古い承認" }, evidence: [], status: "pending", requested_by_user_id: currentUser.id, decided_by_user_id: null, decided_at: null, created_at: first.created_at }]));
   await waitFor(() => expect(screen.queryByText("古い承認")).toBeNull());
+  expect((screen.getByRole("button", { name: /承認が必要な操作.*確認する/ }) as HTMLButtonElement).disabled).toBe(false);
 });
 
 it("discards delayed approval creation after switching conversations", async () => {

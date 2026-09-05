@@ -147,7 +147,9 @@ export default function Home() {
     setApprovals([]);
     setApprovalsOpen(false);
     setApprovalsLoaded(false);
+    setApprovalBusy(false);
     setApprovalError("");
+    setHandoffSummary("");
   }
   function stopCapture() {
     captureGeneration.current += 1;
