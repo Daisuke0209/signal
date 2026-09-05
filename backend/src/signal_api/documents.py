@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -15,6 +16,7 @@ from signal_api.models import (
     DocumentProcessingStatus,
     Membership,
     Organization,
+    User,
 )
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -28,6 +30,39 @@ class DocumentResponse(BaseModel):
     content_type: str
     byte_size: int
     processing_status: DocumentProcessingStatus
+    processing_error: str | None
+    created_at: datetime
+    uploaded_by_name: str
+
+
+def to_document_response(document: Document, db: Session) -> DocumentResponse:
+    uploader = db.get(User, document.uploaded_by_user_id)
+    if uploader is None:
+        raise RuntimeError("Document uploader is missing")
+    return DocumentResponse(
+        id=document.id,
+        organization_id=document.organization_id,
+        filename=document.filename,
+        content_type=document.content_type,
+        byte_size=document.byte_size,
+        processing_status=document.processing_status,
+        processing_error=document.processing_error,
+        created_at=document.created_at,
+        uploaded_by_name=uploader.name,
+    )
+
+
+@router.get("", response_model=list[DocumentResponse])
+def list_documents(
+    organization_id: uuid.UUID, db: DatabaseSession, current_user: CurrentUser
+) -> list[DocumentResponse]:
+    require_membership(organization_id, current_user.id, db)
+    documents = db.scalars(
+        select(Document)
+        .where(Document.organization_id == organization_id)
+        .order_by(Document.created_at.desc(), Document.id.desc())
+    ).all()
+    return [to_document_response(document, db) for document in documents]
 
 
 def require_membership(
@@ -96,4 +131,7 @@ async def create_document(
         content_type=document.content_type,
         byte_size=document.byte_size,
         processing_status=document.processing_status,
+        processing_error=document.processing_error,
+        created_at=document.created_at,
+        uploaded_by_name=current_user.name,
     )
