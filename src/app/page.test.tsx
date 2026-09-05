@@ -1181,6 +1181,28 @@ describe("handoff inbox", () => {
     await waitFor(() => expect(screen.queryByRole("button", { name: "回答して解決" })).toBeNull());
   });
 
+  it("does not offer response controls for a handoff claimed by another member", async () => {
+    const claimedByAnotherMember = {
+      ...openHandoff,
+      status: "claimed",
+      assignee_user_id: "another-member",
+      claimed_at: detail.created_at,
+    };
+    const fetchMock = vi.fn();
+    initial(fetchMock);
+    fetchMock.mockResolvedValueOnce(jsonResponse([claimedByAnotherMember]));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+
+    await screen.findByText("進行中の商談");
+    fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+
+    expect(await screen.findByText("別の担当者が対応中です。")).toBeDefined();
+    expect(screen.queryByLabelText("回答 営業支援")).toBeNull();
+    expect(screen.queryByRole("button", { name: "回答して解決" })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
   it("discards a delayed inbox result after a conversation switch", async () => {
     let resolveInbox: ((response: Response) => void) | undefined;
     const other = { ...detail, id: "conversation-other" };

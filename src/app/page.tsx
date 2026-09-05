@@ -832,7 +832,8 @@ export default function Home() {
                         受け取る
                       </button>
                     )}
-                    {handoff.status === "claimed" && (
+                    {handoff.status === "claimed" &&
+                      handoff.assignee_user_id === user.id && (
                       <>
                         <textarea
                           aria-label={`回答 ${handoff.target}`}
@@ -859,6 +860,10 @@ export default function Home() {
                         </button>
                       </>
                     )}
+                    {handoff.status === "claimed" &&
+                      handoff.assignee_user_id !== user.id && (
+                        <p>別の担当者が対応中です。</p>
+                      )}
                   </article>
                 ))}
             </div>
