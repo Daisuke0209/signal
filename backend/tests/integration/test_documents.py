@@ -17,7 +17,14 @@ from signal_api import documents
 from signal_api.config import get_settings
 from signal_api.database import SessionLocal
 from signal_api.main import app
-from signal_api.models import Document, DocumentPage, Membership, Organization, User
+from signal_api.models import (
+    Document,
+    DocumentPage,
+    DocumentProcessingStatus,
+    Membership,
+    Organization,
+    User,
+)
 from signal_api.security import hash_password
 
 PASSWORD = "document-api-test-password"
@@ -580,3 +587,163 @@ def test_extract_other_organization_does_not_mutate_document(
         with SessionLocal() as db:
             db.execute(delete(Organization).where(Organization.id == other_id))
             db.commit()
+
+
+@pytest.mark.parametrize(
+    "initial_status",
+    [
+        DocumentProcessingStatus.PENDING,
+        DocumentProcessingStatus.FAILED,
+        DocumentProcessingStatus.TEXT_UNAVAILABLE,
+    ],
+)
+def test_retry_document_reprocesses_retryable_states(
+    document_user: tuple[uuid.UUID, str],
+    storage: Path,
+    initial_status: DocumentProcessingStatus,
+) -> None:
+    organization_id, email = document_user
+    fixture = Path(__file__).parents[1] / "fixtures" / "signal-demo-product.pdf"
+    storage_key = str(uuid.uuid4())
+    (storage / storage_key).write_bytes(fixture.read_bytes())
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="retry.pdf",
+            content_type="application/pdf",
+            byte_size=fixture.stat().st_size,
+            storage_key=storage_key,
+            processing_status=initial_status,
+            processing_error="previous failure",
+        )
+        db.add(document)
+        db.commit()
+        document_id = document.id
+
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        response = client.post(f"/documents/{document_id}/retry")
+
+    assert response.status_code == 200
+    assert response.json()["processing_status"] == "ready"
+    with SessionLocal() as db:
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(DocumentPage)
+                .where(DocumentPage.document_id == document_id)
+            )
+            == 3
+        )
+
+
+def test_retry_document_is_idempotent_when_ready(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
+    organization_id, email = document_user
+    key = str(uuid.uuid4())
+    (storage / key).write_bytes(b"not read for a ready document")
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="ready.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=key,
+            processing_status=DocumentProcessingStatus.READY,
+        )
+        db.add(document)
+        db.flush()
+        db.add(DocumentPage(document_id=document.id, page_number=1, content="料金"))
+        db.commit()
+        document_id = document.id
+
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        response = client.post(f"/documents/{document_id}/retry")
+
+    assert response.status_code == 200
+    assert response.json()["processing_status"] == "ready"
+    with SessionLocal() as db:
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(DocumentPage)
+                .where(DocumentPage.document_id == document_id)
+            )
+            == 1
+        )
+
+
+def test_retry_document_rejects_processing_and_other_organization(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
+    organization_id, email = document_user
+    other_id = uuid.uuid4()
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        other = Organization(name="Other", slug=f"retry-other-{other_id}")
+        db.add(other)
+        db.flush()
+        processing = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="processing.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=str(uuid.uuid4()),
+            processing_status=DocumentProcessingStatus.PROCESSING,
+        )
+        denied = Document(
+            organization_id=other.id,
+            uploaded_by_user_id=user_id,
+            filename="other.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=str(uuid.uuid4()),
+            processing_status=DocumentProcessingStatus.FAILED,
+        )
+        db.add_all([processing, denied])
+        db.commit()
+        processing_id, denied_id = processing.id, denied.id
+    try:
+        with TestClient(app) as client:
+            client.post("/auth/login", json={"email": email, "password": PASSWORD})
+            assert client.post(f"/documents/{processing_id}/retry").status_code == 409
+            assert client.post(f"/documents/{denied_id}/retry").status_code == 403
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(Organization).where(Organization.id == other_id))
+            db.commit()
+
+
+def test_retry_document_marks_missing_blob_as_failed(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
+    organization_id, email = document_user
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="missing.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=str(uuid.uuid4()),
+            processing_status=DocumentProcessingStatus.FAILED,
+        )
+        db.add(document)
+        db.commit()
+        document_id = document.id
+
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        response = client.post(f"/documents/{document_id}/retry")
+
+    assert response.status_code == 200
+    assert response.json()["processing_status"] == "failed"
+    assert response.json()["processing_error"] == "PDF extraction failed"
