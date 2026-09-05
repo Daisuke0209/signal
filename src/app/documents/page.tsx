@@ -257,18 +257,21 @@ export default function DocumentsPage() {
                     <p className={styles.failure}>{processingErrorLabel(document)}</p>
                   )}
                 </div>
-                <span data-status={document.processing_status}>
-                  {statusLabel[document.processing_status]}
-                </span>
-                {document.processing_status !== "ready" &&
-                  document.processing_status !== "processing" && (
-                    <button
-                      disabled={retrying !== null}
-                      onClick={() => void retry(document)}
-                    >
-                      {retrying === document.id ? "再解析中…" : "再解析"}
-                    </button>
-                  )}
+                <div className={styles.rowActions}>
+                  <span data-status={document.processing_status}>
+                    {statusLabel[document.processing_status]}
+                  </span>
+                  {document.processing_status !== "ready" &&
+                    document.processing_status !== "processing" && (
+                      <button
+                        className={styles.retryButton}
+                        disabled={retrying !== null}
+                        onClick={() => void retry(document)}
+                      >
+                        {retrying === document.id ? "再解析中…" : "再解析"}
+                      </button>
+                    )}
+                </div>
               </li>
             ))}
           </ul>
