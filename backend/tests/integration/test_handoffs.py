@@ -114,3 +114,56 @@ def test_handoffs_require_an_authenticated_organization_member(
                 db.execute(
                     delete(ApprovalRequest).where(ApprovalRequest.id == approval_id)
                 )
+
+
+def test_only_one_organization_member_can_claim_a_handoff(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, owner_email = conversation_user
+    approval_id: uuid.UUID | None = None
+    helper_ids: list[uuid.UUID] = []
+    helper_emails = [
+        f"handoff-claim-a-{uuid.uuid4()}@signal.local",
+        f"handoff-claim-b-{uuid.uuid4()}@signal.local",
+    ]
+    try:
+        with SessionLocal.begin() as db:
+            for index, email in enumerate(helper_emails):
+                helper = User(
+                    name=f"Handoff Claim Helper {index}",
+                    email=email,
+                    password_hash=hash_password(TEST_PASSWORD),
+                )
+                db.add(helper)
+                db.flush()
+                helper_ids.append(helper.id)
+                db.add(Membership(organization_id=organization_id, user_id=helper.id))
+        with TestClient(app) as owner:
+            login(owner, owner_email)
+            approval_id = uuid.UUID(
+                create_approved_handoff(
+                    owner, create_conversation(owner, organization_id)
+                )
+            )
+        with TestClient(app) as first:
+            login(first, helper_emails[0])
+            assert first.post(f"/handoffs/{approval_id}/claim").status_code == 200
+        with TestClient(app) as second:
+            login(second, helper_emails[1])
+            assert second.post(f"/handoffs/{approval_id}/claim").status_code == 409
+            assert (
+                second.post(
+                    f"/handoffs/{approval_id}/respond",
+                    json={"content": "別の担当者による回答"},
+                ).status_code
+                == 409
+            )
+    finally:
+        if approval_id is not None:
+            with SessionLocal.begin() as db:
+                db.execute(
+                    delete(ApprovalRequest).where(ApprovalRequest.id == approval_id)
+                )
+        if helper_ids:
+            with SessionLocal.begin() as db:
+                db.execute(delete(User).where(User.id.in_(helper_ids)))
