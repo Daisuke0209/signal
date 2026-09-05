@@ -39,6 +39,29 @@ afterEach(() => {
 });
 
 describe("authentication page", () => {
+  it("renders an existing conversation in message order", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(userResponse())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([{ id: "conversation-1", organization_id: "org-1", status: "active", created_at: "2026-09-05T12:00:00Z" }]), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "conversation-1", organization_id: "org-1", created_by_user_id: "user-1", status: "active", created_at: "2026-09-05T12:00:00Z", participants: [], messages: [{ id: "message-1", participant_id: "participant-1", speaker_label: "通話相手", side: "customer", sequence_number: 1, content: "最初の発言" }, { id: "message-2", participant_id: "participant-2", speaker_label: "自分", side: "sales_rep", sequence_number: 2, content: "次の発言" }] }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Home />);
+
+    expect(await screen.findByText("最初の発言")).toBeDefined();
+    expect(screen.getByText("次の発言")).toBeDefined();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:8000/conversations/conversation-1",
+      expect.objectContaining({ credentials: "include" }),
+    );
+  });
+
   it("restores an existing session", async () => {
     const fetchMock = vi
       .fn()
