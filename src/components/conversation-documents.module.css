@@ -1,0 +1,87 @@
+.root {
+  position: relative;
+}
+
+.trigger,
+.save {
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.trigger {
+  padding: 9px 11px;
+  border: 1px solid #dce1e8;
+  background: #fff;
+  color: #465366;
+}
+
+.trigger:hover:not(:disabled) {
+  background: #f5f7fa;
+}
+
+.panel {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(304px, calc(100vw - 32px));
+  padding: 16px;
+  border: 1px solid #dde2e9;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 30px #25334b1a;
+}
+
+.description,
+.error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.description {
+  color: #657184;
+}
+
+.error {
+  margin-top: 10px;
+  color: #a24747;
+}
+
+.options {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 34px;
+  padding: 7px 8px;
+  border-radius: 7px;
+  color: #3f4a5a;
+  font-size: 12px;
+}
+
+.option:hover {
+  background: #f5f7fa;
+}
+
+.option input {
+  accent-color: #308869;
+}
+
+.save {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #293445;
+  background: #293445;
+  color: #fff;
+}
+
+.save:hover:not(:disabled) {
+  background: #3b485d;
+}

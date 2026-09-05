@@ -1,0 +1,39 @@
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+const api = vi.hoisted(() => ({ listReadyDocuments: vi.fn(), getConversationDocuments: vi.fn(), saveConversationDocuments: vi.fn() }));
+vi.mock("@/lib/conversation-documents-api", () => api);
+import { ConversationDocuments } from "./conversation-documents";
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+it("retries a failed save", async () => { api.listReadyDocuments.mockResolvedValue([{id:"d",filename:"資料"}]); api.getConversationDocuments.mockResolvedValue([]); api.saveConversationDocuments.mockRejectedValueOnce(new Error()).mockResolvedValueOnce([]); render(<ConversationDocuments conversationId="c" organizationId="o" ended={false} />); fireEvent.click(screen.getByRole("button",{name:/参照資料/})); fireEvent.click(await screen.findByRole("checkbox")); fireEvent.click(screen.getByRole("button",{name:"保存"})); expect(await screen.findByRole("alert")).toBeDefined(); fireEvent.click(screen.getByRole("button",{name:"保存"})); await waitFor(()=>expect(api.saveConversationDocuments).toHaveBeenCalledTimes(2)); });
+it("ignores an old conversation load after remount", async () => { let resolveOld!: (v: unknown)=>void; api.listReadyDocuments.mockResolvedValue([{id:"new",filename:"新資料"}]); api.getConversationDocuments.mockImplementationOnce(() => new Promise((r)=>{resolveOld=r;})).mockResolvedValueOnce([{id:"new"}]); const view=render(<ConversationDocuments key="old" conversationId="old" organizationId="o" ended={false}/>); fireEvent.click(screen.getByRole("button",{name:/参照資料/})); view.rerender(<ConversationDocuments key="new" conversationId="new" organizationId="o" ended={false}/>); fireEvent.click(screen.getByRole("button",{name:/参照資料/})); expect(await screen.findByText("新資料")).toBeDefined(); resolveOld([{id:"old"}]); await Promise.resolve(); expect(screen.getByText("新資料")).toBeDefined(); });
+
+it("does not save before the initial selection load completes", async () => {
+  let resolveSelection!: (value: unknown) => void;
+  api.listReadyDocuments.mockResolvedValue([{ id: "d", filename: "資料" }]);
+  api.getConversationDocuments.mockImplementation(
+    () => new Promise((resolve) => { resolveSelection = resolve; }),
+  );
+  render(<ConversationDocuments conversationId="c" organizationId="o" ended={false} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "参照資料" }));
+  const save = screen.getByRole("button", { name: "保存" }) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  fireEvent.click(save);
+  expect(api.saveConversationDocuments).not.toHaveBeenCalled();
+
+  resolveSelection([]);
+  expect(await screen.findByRole("checkbox")).toBeDefined();
+});
+
+it("does not save when the initial selection load fails", async () => {
+  api.listReadyDocuments.mockResolvedValue([{ id: "d", filename: "資料" }]);
+  api.getConversationDocuments.mockRejectedValue(new Error("network failed"));
+  render(<ConversationDocuments conversationId="c" organizationId="o" ended={false} />);
+
+  fireEvent.click(screen.getByRole("button", { name: "参照資料" }));
+  expect(await screen.findByRole("alert")).toBeDefined();
+  const save = screen.getByRole("button", { name: "保存" }) as HTMLButtonElement;
+  expect(save.disabled).toBe(true);
+  fireEvent.click(save);
+  expect(api.saveConversationDocuments).not.toHaveBeenCalled();
+});
