@@ -49,6 +49,26 @@ describe("audio capture", () => {
     expect(captureFailure(failure)).toBe("permission-denied");
   });
 
+  it("releases both streams when microphone audio is missing", async () => {
+    const tabTrack = { stop: vi.fn() } as unknown as MediaStreamTrack;
+    const display = stream([tabTrack]);
+    const microphone = stream();
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getDisplayMedia: vi.fn().mockResolvedValue(display),
+        getUserMedia: vi.fn().mockResolvedValue(microphone),
+      },
+    });
+
+    await expect(startAudioCapture()).rejects.toThrow(
+      "missing-microphone-audio",
+    );
+    expect(tabTrack.stop).toHaveBeenCalledOnce();
+    expect(captureFailure(new Error("missing-microphone-audio"))).toBe(
+      "missing-microphone-audio",
+    );
+  });
+
   it("stops every track when capture is explicitly stopped", () => {
     const first = { stop: vi.fn() } as unknown as MediaStreamTrack;
     const second = { stop: vi.fn() } as unknown as MediaStreamTrack;

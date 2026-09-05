@@ -69,9 +69,11 @@ export default function Home() {
       setError(
         reason === "missing-tab-audio"
           ? "共有したタブに音声がありません。タブ音声を共有してください。"
-          : reason === "permission-denied"
-            ? "共有またはマイクの権限が許可されませんでした。"
-            : "音声共有がキャンセルされました。",
+          : reason === "missing-microphone-audio"
+            ? "マイクから音声を取得できませんでした。マイクを確認してください。"
+            : reason === "permission-denied"
+              ? "共有またはマイクの権限が許可されませんでした。"
+              : "音声共有がキャンセルされました。",
       );
       stopCapture();
     } finally {
