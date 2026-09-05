@@ -35,6 +35,7 @@ class ConversationResponse(BaseModel):
     organization_id: uuid.UUID
     created_by_user_id: uuid.UUID
     status: ConversationStatus
+    created_at: datetime
 
 
 class ConversationListItemResponse(BaseModel):
@@ -129,6 +130,7 @@ def create_conversation(
         organization_id=conversation.organization_id,
         created_by_user_id=conversation.created_by_user_id,
         status=conversation.status,
+        created_at=conversation.created_at,
     )
 
 
@@ -268,6 +270,7 @@ def end_conversation(
         organization_id=conversation.organization_id,
         created_by_user_id=conversation.created_by_user_id,
         status=conversation.status,
+        created_at=conversation.created_at,
     )
 
 
