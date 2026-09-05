@@ -1,11 +1,15 @@
+import json
+import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
 from test_conversations import TEST_PASSWORD, create_conversation, login
 from test_conversations import conversation_user as conversation_user
 
+from signal_api import domain_traces
 from signal_api.database import SessionLocal
 from signal_api.main import app
 from signal_api.models import (
@@ -48,7 +52,12 @@ def handoff_count(approval_id: uuid.UUID) -> int:
 
 def test_approve_is_idempotent_and_creates_one_internal_handoff(
     conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    log = logging.getLogger("signal_test.approval_traces")
+    monkeypatch.setattr(domain_traces, "logger", log)
+    caplog.set_level(logging.INFO, logger=log.name)
     organization_id, _, email = conversation_user
     approval_id: uuid.UUID | None = None
     try:
@@ -74,13 +83,37 @@ def test_approve_is_idempotent_and_creates_one_internal_handoff(
         assert first.status_code == second.status_code == 200
         assert first.json()["status"] == second.json()["status"] == "approved"
         assert handoff_count(approval_id) == 1
+        records = [json.loads(r.message) for r in caplog.records if r.name == log.name]
+        decisions = [
+            r
+            for r in records
+            if r["event"]
+            in {"approval.created", "approval.approved", "approval.decision_replayed"}
+        ]
+        assert [r["event"] for r in decisions] == [
+            "approval.created",
+            "approval.approved",
+            "approval.decision_replayed",
+        ]
+        assert all(
+            r["operation_id"] == str(approval_id)
+            and r["conversation_id"] == str(conversation_id)
+            for r in decisions
+        )
+        assert "確認依頼" not in caplog.text
+        assert "営業支援" not in caplog.text
     finally:
         delete_approval(approval_id)
 
 
 def test_rejected_approval_cannot_be_approved_or_create_handoff(
     conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    log = logging.getLogger("signal_test.approval_failure")
+    monkeypatch.setattr(domain_traces, "logger", log)
+    caplog.set_level(logging.INFO, logger=log.name)
     organization_id, _, email = conversation_user
     approval_id: uuid.UUID | None = None
     try:
@@ -108,6 +141,13 @@ def test_rejected_approval_cannot_be_approved_or_create_handoff(
             )
 
         assert handoff_count(approval_id) == 0
+        records = [json.loads(r.message) for r in caplog.records if r.name == log.name]
+        failed = [r for r in records if r["outcome"] == "failed"]
+        assert len(failed) == 1
+        assert failed[0]["event"] == "approval.decide"
+        assert failed[0]["operation_id"] == str(approval_id)
+        assert failed[0]["error_code"] == "operation_failed"
+        assert "確認依頼" not in caplog.text
     finally:
         delete_approval(approval_id)
 
