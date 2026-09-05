@@ -371,6 +371,91 @@ def test_get_conversation_returns_not_found_for_unknown_conversation(
     assert response.json() == {"detail": "Conversation not found"}
 
 
+def test_end_conversation_is_idempotent_and_prevents_new_messages(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        conversation_id = create_conversation(client, organization_id)
+        first_end_response = client.post(f"/conversations/{conversation_id}/end")
+        repeated_end_response = client.post(f"/conversations/{conversation_id}/end")
+        detail_response = client.get(f"/conversations/{conversation_id}")
+        message_response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(),
+        )
+
+    assert first_end_response.status_code == 200
+    assert repeated_end_response.status_code == 200
+    assert first_end_response.json()["status"] == "ended"
+    assert repeated_end_response.json() == first_end_response.json()
+    assert detail_response.status_code == 200
+    assert detail_response.json()["status"] == "ended"
+    assert message_response.status_code == 409
+    assert message_response.json() == {"detail": "Conversation has ended"}
+
+
+def test_end_conversation_requires_authentication() -> None:
+    with TestClient(app) as client:
+        response = client.post(f"/conversations/{uuid.uuid4()}/end")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Authentication required"}
+
+
+def test_end_conversation_rejects_non_member(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    _, user_id, email = conversation_user
+    other_organization_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        db.add(
+            Organization(
+                id=other_organization_id,
+                name="End Conversation Other Organization",
+                slug=f"end-conversation-other-{uuid.uuid4()}",
+            )
+        )
+        db.flush()
+        conversation = Conversation(
+            organization_id=other_organization_id,
+            created_by_user_id=user_id,
+        )
+        db.add(conversation)
+        db.commit()
+        conversation_id = conversation.id
+
+    try:
+        with TestClient(app) as client:
+            login(client, email)
+            response = client.post(f"/conversations/{conversation_id}/end")
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Not a member of this organization"}
+    finally:
+        with SessionLocal() as db:
+            db.execute(
+                delete(Organization).where(Organization.id == other_organization_id)
+            )
+            db.commit()
+
+
+def test_end_conversation_returns_not_found_for_unknown_conversation(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    _, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        response = client.post(f"/conversations/{uuid.uuid4()}/end")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Conversation not found"}
+
+
 def test_add_messages_reuses_speaker_and_assigns_sequence_numbers(
     conversation_user: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
