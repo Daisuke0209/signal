@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from signal_api.approvals import router as approvals_router
 from signal_api.auth import router as auth_router
 from signal_api.config import get_settings
 from signal_api.conversations import router as conversations_router
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Signal API", lifespan=lifespan)
 app.add_middleware(RequestLoggingMiddleware)
 app.include_router(auth_router)
+app.include_router(approvals_router)
 app.include_router(conversations_router)
 app.include_router(documents_router)
 app.include_router(suggestions_router)
