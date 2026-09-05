@@ -392,6 +392,139 @@ class Document(Base):
     )
 
 
+class SuggestionRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+
+
+class SuggestionKind(StrEnum):
+    QUESTION = "question"
+    RESPONSE = "response"
+    CONFIRMATION = "confirmation"
+
+
+class SuggestionErrorCode(StrEnum):
+    PROVIDER_UNAVAILABLE = "provider_unavailable"
+    TIMEOUT = "timeout"
+    GENERATION_FAILED = "generation_failed"
+    INTERRUPTED = "interrupted"
+
+
+class SuggestionRun(Base):
+    __tablename__ = "suggestion_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="suggestion_run_status",
+        ),
+        CheckConstraint(
+            "error_code IN ('provider_unavailable', 'timeout', "
+            "'generation_failed', 'interrupted')",
+            name="suggestion_error_code",
+        ),
+        UniqueConstraint(
+            "conversation_id", "generation", name="suggestion_runs_generation_unique"
+        ),
+        CheckConstraint("generation > 0", name="suggestion_runs_generation_positive"),
+        ForeignKeyConstraint(
+            ["conversation_id", "input_sequence_number"],
+            [
+                "conversation_messages.conversation_id",
+                "conversation_messages.sequence_number",
+            ],
+            name="suggestion_runs_input_message_fk",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "(status IN ('queued', 'running') AND completed_at IS NULL "
+            "AND error_code IS NULL) "
+            "OR (status = 'succeeded' AND completed_at IS NOT NULL "
+            "AND error_code IS NULL) "
+            "OR (status = 'failed' AND completed_at IS NOT NULL "
+            "AND error_code IS NOT NULL)",
+            name="suggestion_runs_terminal_state_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[SuggestionRunStatus] = mapped_column(
+        Enum(
+            SuggestionRunStatus,
+            values_callable=lambda members: [m.value for m in members],
+            name="suggestion_run_status",
+            native_enum=False,
+            create_constraint=False,
+        ),
+        nullable=False,
+        server_default="queued",
+    )
+    error_code: Mapped[SuggestionErrorCode | None] = mapped_column(
+        Enum(
+            SuggestionErrorCode,
+            values_callable=lambda members: [m.value for m in members],
+            name="suggestion_error_code",
+            native_enum=False,
+            create_constraint=False,
+        ),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class Suggestion(Base):
+    __tablename__ = "suggestions"
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('question', 'response', 'confirmation')",
+            name="suggestion_kind",
+        ),
+        UniqueConstraint("run_id", "position", name="suggestions_run_position_unique"),
+        CheckConstraint("position >= 0", name="suggestions_position_nonnegative"),
+        CheckConstraint(
+            "length(btrim(content)) > 0 AND length(content) <= 4000",
+            name="suggestions_content_length_check",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("suggestion_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    kind: Mapped[SuggestionKind] = mapped_column(
+        Enum(
+            SuggestionKind,
+            values_callable=lambda members: [m.value for m in members],
+            name="suggestion_kind",
+            native_enum=False,
+            create_constraint=False,
+        ),
+        nullable=False,
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class DocumentPage(Base):
     __tablename__ = "document_pages"
     __table_args__ = (
