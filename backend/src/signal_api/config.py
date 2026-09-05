@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     document_storage_dir: Path = ROOT_ENV_FILE.parent / ".local" / "documents"
     document_max_size_bytes: int = 20 * 1024 * 1024
     document_max_count_per_organization: int = 100
+    openai_api_key: SecretStr | None = None
+    transcription_model: str = "gpt-live-transcribe"
 
     @property
     def sqlalchemy_database_url(self) -> str:
