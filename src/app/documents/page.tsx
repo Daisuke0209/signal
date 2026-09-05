@@ -44,6 +44,9 @@ export default function DocumentsPage() {
   function selectOrganization(nextOrganizationId: string) {
     selectedOrganizationId.current = nextOrganizationId;
     setOrganizationId(nextOrganizationId);
+    setDocuments([]);
+    setRetrying(null);
+    setError("");
   }
 
   async function loadDocuments(nextOrganizationId: string) {
@@ -134,13 +137,25 @@ export default function DocumentsPage() {
 
   async function retry(document: Document) {
     if (retrying || document.processing_status === "processing") return;
-    const currentOrganizationId = organizationId;
-    setRetrying(document.id); setError("");
+    const retryOrganizationId = selectedOrganizationId.current;
+    setRetrying(document.id);
+    setError("");
     try {
       const next = await retryDocument(document.id);
-      if (organizationId === currentOrganizationId) setDocuments((items) => items.map((item) => item.id === next.id ? next : item));
-    } catch { if (organizationId === currentOrganizationId) setError("資料を再解析できませんでした。もう一度お試しください。"); }
-    finally { setRetrying(null); }
+      if (selectedOrganizationId.current === retryOrganizationId) {
+        setDocuments((items) =>
+          items.map((item) => (item.id === next.id ? next : item)),
+        );
+      }
+    } catch {
+      if (selectedOrganizationId.current === retryOrganizationId) {
+        setError("資料を再解析できませんでした。もう一度お試しください。");
+      }
+    } finally {
+      if (selectedOrganizationId.current === retryOrganizationId) {
+        setRetrying(null);
+      }
+    }
   }
 
   if (checking) {
@@ -227,7 +242,15 @@ export default function DocumentsPage() {
                 <span data-status={document.processing_status}>
                   {statusLabel[document.processing_status]}
                 </span>
-                {document.processing_status !== "ready" && document.processing_status !== "processing" && <button disabled={retrying !== null} onClick={() => void retry(document)}>{retrying === document.id ? "再解析中…" : "再解析"}</button>}
+                {document.processing_status !== "ready" &&
+                  document.processing_status !== "processing" && (
+                    <button
+                      disabled={retrying !== null}
+                      onClick={() => void retry(document)}
+                    >
+                      {retrying === document.id ? "再解析中…" : "再解析"}
+                    </button>
+                  )}
               </li>
             ))}
           </ul>

@@ -48,6 +48,135 @@ describe("document management page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "再解析" }));
     expect(await screen.findByText("利用可能")).toBeDefined();
   });
+
+  it("keeps retry available after a reprocessing request fails", async () => {
+    const failed = {
+      ...registered,
+      processing_status: "failed",
+      processing_error: "PDF extraction failed",
+    };
+    let retryAttempts = 0;
+    vi.stubGlobal("fetch", vi.fn((input: string, init?: RequestInit) => {
+      if (input.endsWith("/auth/me")) return Promise.resolve(response(user));
+      if (input.includes("?organization_id=org-1")) return Promise.resolve(response([failed]));
+      if (input.endsWith("/documents/document-1/retry") && init?.method === "POST") {
+        retryAttempts += 1;
+        if (retryAttempts === 1) return Promise.reject(new Error("temporary failure"));
+        return Promise.resolve(response({ ...registered, processing_status: "ready" }));
+      }
+      return Promise.reject(new Error("unexpected"));
+    }));
+
+    render(<DocumentsPage />);
+    const retryButton = await screen.findByRole("button", { name: "再解析" });
+    fireEvent.click(retryButton);
+    expect((await screen.findByRole("alert")).textContent).toContain("資料を再解析できませんでした");
+    expect((screen.getByRole("button", { name: "再解析" }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "再解析" }));
+    expect(await screen.findByText("利用可能")).toBeDefined();
+    expect(retryAttempts).toBe(2);
+  });
+
+  it("does not offer reprocessing while a document is processing", async () => {
+    vi.stubGlobal("fetch", vi.fn((input: string) => {
+      if (input.endsWith("/auth/me")) return Promise.resolve(response(user));
+      if (input.includes("?organization_id=org-1")) {
+        return Promise.resolve(response([{ ...registered, processing_status: "processing" }]));
+      }
+      return Promise.reject(new Error("unexpected"));
+    }));
+
+    render(<DocumentsPage />);
+    expect(await screen.findByText("解析中")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "再解析" })).toBeNull();
+  });
+
+  it("ignores late retry results and errors after switching organizations", async () => {
+    const multipleOrganizations = {
+      ...user,
+      organizations: [
+        ...user.organizations,
+        { id: "org-2", name: "開発部", slug: "engineering", role: "member" },
+      ],
+    };
+    const oldDocument = { ...registered, processing_status: "failed" };
+    const currentDocument = {
+      ...registered,
+      id: "document-2",
+      organization_id: "org-2",
+      filename: "開発部資料.pdf",
+      processing_status: "failed",
+    };
+    let resolveRetry: (value: Response) => void = () => undefined;
+    const retryResponse = new Promise<Response>((resolve) => {
+      resolveRetry = resolve;
+    });
+    vi.stubGlobal("fetch", vi.fn((input: string, init?: RequestInit) => {
+      if (input.endsWith("/auth/me")) return Promise.resolve(response(multipleOrganizations));
+      if (input.includes("?organization_id=org-1")) return Promise.resolve(response([oldDocument]));
+      if (input.includes("?organization_id=org-2")) return Promise.resolve(response([currentDocument]));
+      if (input.endsWith("/documents/document-1/retry") && init?.method === "POST") return retryResponse;
+      return Promise.reject(new Error("unexpected"));
+    }));
+
+    render(<DocumentsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "再解析" }));
+    fireEvent.change(screen.getByLabelText("組織"), { target: { value: "org-2" } });
+    expect(await screen.findByText("開発部資料.pdf")).toBeDefined();
+
+    resolveRetry(response({ ...registered, processing_status: "ready" }));
+    await waitFor(() => {
+      expect(screen.getByText("開発部資料.pdf")).toBeDefined();
+      expect(screen.queryByText("料金表.pdf")).toBeNull();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
+
+  it("ignores a late retry failure after switching organizations", async () => {
+    const multipleOrganizations = {
+      ...user,
+      organizations: [
+        ...user.organizations,
+        { id: "org-2", name: "開発部", slug: "engineering", role: "member" },
+      ],
+    };
+    let rejectRetry: (reason?: unknown) => void = () => undefined;
+    const retryResponse = new Promise<Response>((_, reject) => {
+      rejectRetry = reject;
+    });
+    vi.stubGlobal("fetch", vi.fn((input: string, init?: RequestInit) => {
+      if (input.endsWith("/auth/me")) return Promise.resolve(response(multipleOrganizations));
+      if (input.includes("?organization_id=org-1")) {
+        return Promise.resolve(response([{ ...registered, processing_status: "failed" }]));
+      }
+      if (input.includes("?organization_id=org-2")) {
+        return Promise.resolve(response([
+          {
+            ...registered,
+            id: "document-2",
+            organization_id: "org-2",
+            filename: "開発部資料.pdf",
+            processing_status: "failed",
+          },
+        ]));
+      }
+      if (input.endsWith("/documents/document-1/retry") && init?.method === "POST") return retryResponse;
+      return Promise.reject(new Error("unexpected"));
+    }));
+
+    render(<DocumentsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "再解析" }));
+    fireEvent.change(screen.getByLabelText("組織"), { target: { value: "org-2" } });
+    expect(await screen.findByText("開発部資料.pdf")).toBeDefined();
+
+    rejectRetry(new Error("network failed"));
+    await Promise.resolve();
+    await waitFor(() => {
+      expect(screen.getByText("開発部資料.pdf")).toBeDefined();
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+  });
   it("shows registered documents and their parsing failure reason", async () => {
     vi.stubGlobal(
       "fetch",
