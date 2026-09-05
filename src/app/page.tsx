@@ -212,15 +212,18 @@ export default function Home() {
       setBusy(false);
     }
   }
-  async function finishCapture() {
-    if (!live.current || isStopping) return;
+  async function finishCapture(): Promise<boolean> {
+    if (!live.current) return true;
+    if (isStopping) return false;
     const generation = captureGeneration.current;
     setIsStopping(true);
     setCaptureState("最後の発言を保存中…");
     try {
       await live.current.stop();
+      return true;
     } catch {
       if (captureGeneration.current === generation) setError(transcriptionError("stop_failed"));
+      return false;
     } finally {
       if (captureGeneration.current === generation) stopCapture();
     }
@@ -377,6 +380,10 @@ export default function Home() {
     setBusy(true);
     setError("");
     try {
+      if (isCapturing && !(await finishCapture())) {
+        setError("音声の確定に失敗しました。商談は進行中のまま、もう一度お試しください。");
+        return;
+      }
       const ended = await endConversation(conversation.id);
       stopCapture();
       setShowManualInput(false);
