@@ -664,6 +664,7 @@ class InternalHandoff(Base):
             InternalHandoffStatus,
             values_callable=lambda members: [member.value for member in members],
             name="internal_handoff_status",
+            length=20,
             native_enum=False,
             create_constraint=False,
         ),
