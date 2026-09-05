@@ -71,7 +71,11 @@ evidence_ids に根拠IDを付けてください。検索の根拠が足りな�
 SEARCH_TOOL: dict[str, Any] = {
     "type": "function",
     "name": "search_documents",
-    "description": "Search the currently authorized internal PDF pages for evidence.",
+    "description": (
+        "Search authorized PDF pages by an exact substring. Use ONE short keyword "
+        "likely to appear verbatim, e.g. SSO, Standard, or 料金. Do not combine "
+        "multiple keywords into a sentence. If empty, try a shorter keyword."
+    ),
     "strict": True,
     "parameters": {
         "type": "object",
