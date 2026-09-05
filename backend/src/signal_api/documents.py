@@ -38,6 +38,74 @@ class DocumentResponse(BaseModel):
     uploaded_by_name: str
 
 
+class DocumentSearchResult(BaseModel):
+    document_id: uuid.UUID
+    document_name: str
+    page_number: int
+    excerpt: str
+    score: int
+
+
+class DocumentSearchRequest(BaseModel):
+    organization_id: uuid.UUID
+    query: str
+    document_ids: list[uuid.UUID] | None = None
+
+
+def search_document_pages(
+    db: Session,
+    organization_id: uuid.UUID,
+    query: str,
+    document_ids: set[uuid.UUID] | None = None,
+    limit: int = 5,
+) -> list[DocumentSearchResult]:
+    normalized = query.strip().casefold()
+    if not normalized:
+        return []
+    statement = (
+        select(Document, DocumentPage)
+        .join(DocumentPage, DocumentPage.document_id == Document.id)
+        .where(
+            Document.organization_id == organization_id,
+            Document.processing_status == DocumentProcessingStatus.READY,
+        )
+    )
+    if document_ids is not None:
+        statement = statement.where(Document.id.in_(document_ids))
+    results: list[DocumentSearchResult] = []
+    for document, page in db.execute(statement):
+        content = page.content.casefold()
+        score = content.count(normalized)
+        if score:
+            index = content.index(normalized)
+            results.append(
+                DocumentSearchResult(
+                    document_id=document.id,
+                    document_name=document.filename,
+                    page_number=page.page_number,
+                    excerpt=page.content[max(0, index - 80) : index + len(query) + 120],
+                    score=score,
+                )
+            )
+    return sorted(
+        results,
+        key=lambda result: (-result.score, str(result.document_id), result.page_number),
+    )[:limit]
+
+
+@router.post("/search", response_model=list[DocumentSearchResult])
+def search_documents(
+    request: DocumentSearchRequest, db: DatabaseSession, current_user: CurrentUser
+) -> list[DocumentSearchResult]:
+    require_membership(request.organization_id, current_user.id, db)
+    return search_document_pages(
+        db,
+        request.organization_id,
+        request.query,
+        None if request.document_ids is None else set(request.document_ids),
+    )
+
+
 def to_document_response(document: Document, db: Session) -> DocumentResponse:
     uploader = db.get(User, document.uploaded_by_user_id)
     if uploader is None:
