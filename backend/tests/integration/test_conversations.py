@@ -104,12 +104,15 @@ def test_create_conversation_for_authenticated_organization_member(
             "/conversations",
             json=valid_request(organization_id),
         )
+        listed = client.get("/conversations").json()
+        detail = client.get(f"/conversations/{response.json()['id']}").json()
 
     assert response.status_code == 201
     body = response.json()
     assert body["organization_id"] == str(organization_id)
     assert body["created_by_user_id"] == str(user_id)
     assert body["status"] == "active"
+    assert body["created_at"] == listed[0]["created_at"] == detail["created_at"]
 
     conversation_id = uuid.UUID(body["id"])
     with SessionLocal() as db:
@@ -118,6 +121,7 @@ def test_create_conversation_for_authenticated_organization_member(
     assert conversation is not None
     assert conversation.organization_id == organization_id
     assert conversation.created_by_user_id == user_id
+    assert datetime.fromisoformat(body["created_at"]) == conversation.created_at
 
 
 def test_create_conversation_requires_authentication() -> None:
