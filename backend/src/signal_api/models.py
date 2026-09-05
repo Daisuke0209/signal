@@ -223,6 +223,11 @@ class ConversationParticipant(Base):
             "id",
             name="conversation_participants_conversation_id_id_unique",
         ),
+        UniqueConstraint(
+            "conversation_id",
+            "speaker_label",
+            name="conversation_participants_conversation_id_speaker_label_unique",
+        ),
         Index("conversation_participants_conversation_id_idx", "conversation_id"),
     )
 
@@ -244,7 +249,8 @@ class ConversationParticipant(Base):
         conversation_participant_side_type,
         nullable=False,
     )
-    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    speaker_label: Mapped[str] = mapped_column(String(100), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

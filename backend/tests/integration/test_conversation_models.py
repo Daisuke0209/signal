@@ -41,22 +41,22 @@ def test_conversation_messages_are_persisted_in_order_and_cascade_deleted() -> N
         customer_one = ConversationParticipant(
             conversation_id=conversation_id,
             side=ConversationParticipantSide.CUSTOMER,
-            display_name="顧客A",
+            speaker_label="speaker_1",
         )
         customer_two = ConversationParticipant(
             conversation_id=conversation_id,
             side=ConversationParticipantSide.CUSTOMER,
-            display_name="顧客B",
+            speaker_label="speaker_2",
         )
         sales_rep_one = ConversationParticipant(
             conversation_id=conversation_id,
             side=ConversationParticipantSide.SALES_REP,
-            display_name="営業A",
+            speaker_label="speaker_3",
         )
         sales_rep_two = ConversationParticipant(
             conversation_id=conversation_id,
             side=ConversationParticipantSide.SALES_REP,
-            display_name="営業B",
+            speaker_label="speaker_4",
         )
         db.add_all([customer_one, customer_two, sales_rep_one, sales_rep_two])
         db.flush()
@@ -92,20 +92,13 @@ def test_conversation_messages_are_persisted_in_order_and_cascade_deleted() -> N
                 )
             ).all()
             assert len(participants) == 4
-            assert (
-                sum(
-                    participant.side is ConversationParticipantSide.CUSTOMER
-                    for participant in participants
-                )
-                == 2
-            )
-            assert (
-                sum(
-                    participant.side is ConversationParticipantSide.SALES_REP
-                    for participant in participants
-                )
-                == 2
-            )
+            assert {participant.speaker_label for participant in participants} == {
+                "speaker_1",
+                "speaker_2",
+                "speaker_3",
+                "speaker_4",
+            }
+            assert all(participant.display_name is None for participant in participants)
 
             messages = db.scalars(
                 select(ConversationMessage)
