@@ -226,6 +226,49 @@ def get_conversation(
 
 
 @router.post(
+    "/{conversation_id}/end",
+    response_model=ConversationResponse,
+)
+def end_conversation(
+    conversation_id: uuid.UUID,
+    db: DatabaseSession,
+    current_user: CurrentUser,
+) -> ConversationResponse:
+    conversation = db.scalar(
+        select(Conversation).where(Conversation.id == conversation_id).with_for_update()
+    )
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    membership = db.get(
+        Membership,
+        {
+            "organization_id": conversation.organization_id,
+            "user_id": current_user.id,
+        },
+    )
+    if membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not a member of this organization",
+        )
+
+    if conversation.status is ConversationStatus.ACTIVE:
+        conversation.status = ConversationStatus.ENDED
+        db.commit()
+
+    return ConversationResponse(
+        id=conversation.id,
+        organization_id=conversation.organization_id,
+        created_by_user_id=conversation.created_by_user_id,
+        status=conversation.status,
+    )
+
+
+@router.post(
     "/{conversation_id}/messages",
     response_model=ConversationMessageResponse,
     status_code=status.HTTP_201_CREATED,
