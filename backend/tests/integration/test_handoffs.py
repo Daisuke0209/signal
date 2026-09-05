@@ -1,10 +1,14 @@
+import json
+import logging
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete
 from test_conversations import TEST_PASSWORD, create_conversation, login
 from test_conversations import conversation_user as conversation_user
 
+from signal_api import domain_traces
 from signal_api.database import SessionLocal
 from signal_api.main import app
 from signal_api.models import ApprovalRequest, Membership, User
@@ -32,7 +36,12 @@ def create_approved_handoff(client: TestClient, conversation_id: uuid.UUID) -> s
 
 def test_org_member_claims_and_resolves_handoff_for_original_conversation(
     conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    log = logging.getLogger("signal_test.handoff_traces")
+    monkeypatch.setattr(domain_traces, "logger", log)
+    caplog.set_level(logging.INFO, logger=log.name)
     organization_id, _, owner_email = conversation_user
     helper_email = f"handoff-helper-{uuid.uuid4()}@signal.local"
     approval_id: uuid.UUID | None = None
@@ -81,6 +90,27 @@ def test_org_member_claims_and_resolves_handoff_for_original_conversation(
                 response.json()[0]["response_content"]
                 == "専門担当が明日までに回答します。"
             )
+        records = [json.loads(r.message) for r in caplog.records if r.name == log.name]
+        completed = [
+            r for r in records if r["event"] in {"handoff.claimed", "handoff.resolved"}
+        ]
+        assert [r["event"] for r in completed] == [
+            "handoff.claimed",
+            "handoff.resolved",
+        ]
+        assert all(
+            r["operation_id"] == str(approval_id)
+            and r["conversation_id"] == str(conversation_id)
+            for r in completed
+        )
+        failed = [
+            r
+            for r in records
+            if r["event"] == "handoff.respond" and r["outcome"] == "failed"
+        ]
+        assert len(failed) == 1 and failed[0]["operation_id"] == str(approval_id)
+        assert "専門担当が明日" not in caplog.text
+        assert "技術要件を確認" not in caplog.text
     finally:
         if approval_id is not None:
             with SessionLocal.begin() as db:

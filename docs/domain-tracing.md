@@ -15,6 +15,9 @@ JSON ログは stderr に出る。外部の収集サービスを必須にせず�
 | transcription.provider_connect / first_audio | 文字起こし接続と最初の音声受信 |
 | transcription.partial / final / persist_final / ws_send | 暫定・確定・保存・配信 |
 | transcription.failure / closed | 固定エラーコード・終了状態 |
+| approval.created / approved / rejected / decision_replayed | 承認要求・判断・重複再送（operation_idで関連付け） |
+| handoff.claimed / resolved | 引継ぎの受領・回答保存 |
+| approval.create / decide, handoff.claim / respond | 認可・競合失敗を含む操作境界 |
 | browser.*.paint_opportunity | 受信から React commit 後の描画機会まで（クライアント自己申告） |
 | suggestion.created_to_browser_ack | run作成からブラウザ観測POST到着まで（サーバー時計同士） |
 
@@ -31,4 +34,4 @@ JSON ログは stderr に出る。外部の収集サービスを必須にせず�
 
 モック時計800ms/3500msのテストは測定の計算を検証するだけで、実性能を保証しない。実OpenAI+架空PDFの提案生成ではDB作成〜完了6.67秒を確認済み（ブラウザ表示までの測定ではなく、2〜5秒目標の達成ではない）。実Google Meetと物理マイクを通した遅延は未検証。実測時はブラウザ、音声取得方法、データ、モデル、サンプル数を別途記録する。
 
-承認・人への引継ぎのイベント統合はそれぞれの機能実装後に追加する（Issue #38 / #39）。Issue #40 はその統合まで未完了。
+承認と引継ぎはoperation_id（承認要求ID）で関連付ける。操作の開始・完了・失敗と、DB commit後の承認/拒否/受領/解決を分ける。重複承認はdecision_replayedで、同じ副作用を再実行したとは記録しない。会話と要求の本文・根拠・回答はログへ含めない。

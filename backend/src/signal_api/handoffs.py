@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from signal_api.approvals import authorized_conversation
 from signal_api.auth import CurrentUser
 from signal_api.database import get_db_session
+from signal_api.domain_traces import span, trace, trace_context
 from signal_api.models import (
     ApprovalRequest,
     Conversation,
@@ -140,20 +141,23 @@ def get_handoff(
 def claim_handoff(
     approval_id: uuid.UUID, db: DatabaseSession, current_user: CurrentUser
 ) -> HandoffResponse:
-    handoff, approval = handoff_row(db, approval_id, current_user.id, lock=True)
-    if handoff.status is InternalHandoffStatus.OPEN:
-        handoff.status = InternalHandoffStatus.CLAIMED
-        handoff.assignee_user_id = current_user.id
-        handoff.claimed_at = datetime.now(UTC)
-        db.commit()
-        db.refresh(handoff)
-        return handoff_response(handoff, approval)
-    if (
-        handoff.status is InternalHandoffStatus.CLAIMED
-        and handoff.assignee_user_id == current_user.id
-    ):
-        return handoff_response(handoff, approval)
-    raise HTTPException(status_code=409, detail="Handoff is not available")
+    with trace_context(operation_id=approval_id), span("handoff.claim"):
+        handoff, approval = handoff_row(db, approval_id, current_user.id, lock=True)
+        if handoff.status is InternalHandoffStatus.OPEN:
+            handoff.status = InternalHandoffStatus.CLAIMED
+            handoff.assignee_user_id = current_user.id
+            handoff.claimed_at = datetime.now(UTC)
+            db.commit()
+            db.refresh(handoff)
+            with trace_context(approval.conversation_id, operation_id=approval_id):
+                trace("handoff.claimed")
+            return handoff_response(handoff, approval)
+        if (
+            handoff.status is InternalHandoffStatus.CLAIMED
+            and handoff.assignee_user_id == current_user.id
+        ):
+            return handoff_response(handoff, approval)
+        raise HTTPException(status_code=409, detail="Handoff is not available")
 
 
 @router.post("/handoffs/{approval_id}/respond", response_model=HandoffResponse)
@@ -163,23 +167,26 @@ def respond_to_handoff(
     db: DatabaseSession,
     current_user: CurrentUser,
 ) -> HandoffResponse:
-    handoff, approval = handoff_row(db, approval_id, current_user.id, lock=True)
-    if handoff.status is InternalHandoffStatus.RESOLVED:
-        raise HTTPException(status_code=409, detail="Handoff is already resolved")
-    if (
-        handoff.status is not InternalHandoffStatus.CLAIMED
-        or handoff.assignee_user_id != current_user.id
-    ):
-        raise HTTPException(status_code=409, detail="Handoff is not claimed by you")
-    now = datetime.now(UTC)
-    handoff.status = InternalHandoffStatus.RESOLVED
-    handoff.response_content = request.content
-    handoff.responded_by_user_id = current_user.id
-    handoff.responded_at = now
-    handoff.resolved_at = now
-    db.commit()
-    db.refresh(handoff)
-    return handoff_response(handoff, approval)
+    with trace_context(operation_id=approval_id), span("handoff.respond"):
+        handoff, approval = handoff_row(db, approval_id, current_user.id, lock=True)
+        if handoff.status is InternalHandoffStatus.RESOLVED:
+            raise HTTPException(status_code=409, detail="Handoff is already resolved")
+        if (
+            handoff.status is not InternalHandoffStatus.CLAIMED
+            or handoff.assignee_user_id != current_user.id
+        ):
+            raise HTTPException(status_code=409, detail="Handoff is not claimed by you")
+        now = datetime.now(UTC)
+        handoff.status = InternalHandoffStatus.RESOLVED
+        handoff.response_content = request.content
+        handoff.responded_by_user_id = current_user.id
+        handoff.responded_at = now
+        handoff.resolved_at = now
+        db.commit()
+        db.refresh(handoff)
+        with trace_context(approval.conversation_id, operation_id=approval_id):
+            trace("handoff.resolved")
+        return handoff_response(handoff, approval)
 
 
 @router.get(
