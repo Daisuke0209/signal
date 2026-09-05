@@ -1,5 +1,7 @@
 import uuid
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,6 +11,9 @@ from signal_api.database import SessionLocal
 from signal_api.main import app
 from signal_api.models import (
     Conversation,
+    ConversationMessage,
+    ConversationParticipant,
+    ConversationStatus,
     Membership,
     Organization,
     User,
@@ -64,6 +69,27 @@ def login(client: TestClient, email: str) -> None:
 
 def valid_request(organization_id: uuid.UUID) -> dict[str, object]:
     return {"organization_id": str(organization_id)}
+
+
+def create_conversation(client: TestClient, organization_id: uuid.UUID) -> uuid.UUID:
+    response = client.post(
+        "/conversations",
+        json=valid_request(organization_id),
+    )
+    assert response.status_code == 201
+    return uuid.UUID(response.json()["id"])
+
+
+def message_request(
+    speaker_label: str = "speaker_1",
+    side: str = "customer",
+    content: str = "案件管理に時間がかかっています。",
+) -> dict[str, str]:
+    return {
+        "speaker_label": speaker_label,
+        "side": side,
+        "content": content,
+    }
 
 
 def test_create_conversation_for_authenticated_organization_member(
@@ -167,3 +193,241 @@ def test_create_conversation_rejects_invalid_organization_id_without_saving(
             .where(Conversation.organization_id == organization_id)
         )
     assert conversation_count == 0
+
+
+def test_add_messages_reuses_speaker_and_assigns_sequence_numbers(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        conversation_id = create_conversation(client, organization_id)
+        first_response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(),
+        )
+        second_response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(
+                speaker_label="speaker_2",
+                side="sales_rep",
+                content="現在はどのように管理されていますか？",
+            ),
+        )
+        third_response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(content="スプレッドシートで管理しています。"),
+        )
+
+    assert [
+        first_response.status_code,
+        second_response.status_code,
+        third_response.status_code,
+    ] == [201, 201, 201]
+
+    first_body = first_response.json()
+    second_body = second_response.json()
+    third_body = third_response.json()
+    assert [
+        first_body["sequence_number"],
+        second_body["sequence_number"],
+        third_body["sequence_number"],
+    ] == [1, 2, 3]
+    assert first_body["participant_id"] == third_body["participant_id"]
+    assert first_body["participant_id"] != second_body["participant_id"]
+
+    with SessionLocal() as db:
+        participants = db.scalars(
+            select(ConversationParticipant).where(
+                ConversationParticipant.conversation_id == conversation_id
+            )
+        ).all()
+        messages = db.scalars(
+            select(ConversationMessage)
+            .where(ConversationMessage.conversation_id == conversation_id)
+            .order_by(ConversationMessage.sequence_number)
+        ).all()
+
+    assert len(participants) == 2
+    assert [message.sequence_number for message in messages] == [1, 2, 3]
+    assert [message.content for message in messages] == [
+        "案件管理に時間がかかっています。",
+        "現在はどのように管理されていますか？",
+        "スプレッドシートで管理しています。",
+    ]
+
+
+def test_concurrent_messages_receive_unique_sequence_numbers(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        conversation_id = create_conversation(client, organization_id)
+
+    request_barrier = Barrier(2)
+
+    def add_message(speaker_label: str) -> tuple[int, int]:
+        with TestClient(app) as client:
+            login(client, email)
+            request_barrier.wait()
+            response = client.post(
+                f"/conversations/{conversation_id}/messages",
+                json=message_request(speaker_label=speaker_label),
+            )
+        return response.status_code, response.json()["sequence_number"]
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(add_message, ["speaker_1", "speaker_2"]))
+
+    assert [status_code for status_code, _ in results] == [201, 201]
+    assert sorted(sequence_number for _, sequence_number in results) == [1, 2]
+
+
+def test_add_message_requires_authentication() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            f"/conversations/{uuid.uuid4()}/messages",
+            json=message_request(),
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Authentication required"}
+
+
+def test_add_message_rejects_non_member(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    _, user_id, email = conversation_user
+    other_organization_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        db.add(
+            Organization(
+                id=other_organization_id,
+                name="Message API Other Organization",
+                slug=f"message-api-other-{uuid.uuid4()}",
+            )
+        )
+        db.flush()
+        conversation = Conversation(
+            organization_id=other_organization_id,
+            created_by_user_id=user_id,
+        )
+        db.add(conversation)
+        db.commit()
+        conversation_id = conversation.id
+
+    try:
+        with TestClient(app) as client:
+            login(client, email)
+            response = client.post(
+                f"/conversations/{conversation_id}/messages",
+                json=message_request(),
+            )
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Not a member of this organization"}
+    finally:
+        with SessionLocal() as db:
+            db.execute(
+                delete(Organization).where(Organization.id == other_organization_id)
+            )
+            db.commit()
+
+
+def test_add_message_returns_not_found_for_unknown_conversation(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    _, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        response = client.post(
+            f"/conversations/{uuid.uuid4()}/messages",
+            json=message_request(),
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Conversation not found"}
+
+
+def test_add_message_rejects_ended_conversation(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        conversation_id = create_conversation(client, organization_id)
+        with SessionLocal() as db:
+            conversation = db.get(Conversation, conversation_id)
+            assert conversation is not None
+            conversation.status = ConversationStatus.ENDED
+            db.commit()
+
+        response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(),
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": "Conversation has ended"}
+
+
+def test_add_message_rejects_changing_an_existing_speaker_side(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        conversation_id = create_conversation(client, organization_id)
+        first_response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(),
+        )
+        conflict_response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(side="sales_rep"),
+        )
+
+    assert first_response.status_code == 201
+    assert conflict_response.status_code == 409
+    assert conflict_response.json() == {
+        "detail": "Speaker label is already assigned to a different side"
+    }
+
+    with SessionLocal() as db:
+        message_count = db.scalar(
+            select(func.count())
+            .select_from(ConversationMessage)
+            .where(ConversationMessage.conversation_id == conversation_id)
+        )
+    assert message_count == 1
+
+
+def test_add_message_rejects_empty_content_without_saving(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        conversation_id = create_conversation(client, organization_id)
+        response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(content="   "),
+        )
+
+    assert response.status_code == 422
+
+    with SessionLocal() as db:
+        message_count = db.scalar(
+            select(func.count())
+            .select_from(ConversationMessage)
+            .where(ConversationMessage.conversation_id == conversation_id)
+        )
+    assert message_count == 0
