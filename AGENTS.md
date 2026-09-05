@@ -10,7 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Project context
 
-Last updated: 2026-09-05
+Last updated: 2026-09-06
 
 ### Product
 
@@ -119,17 +119,23 @@ planned until their individual Issues are implemented and verified.
 
 ### Current status
 
-- Auth/AuthZ foundation tables exist for organizations, users, and memberships.
-- The backend is implemented in Python with FastAPI, SQLAlchemy, and Alembic.
-- Python dependencies and commands are managed with uv.
-- An idempotent demo-data seed creates an organization, user, and admin
-  membership with a hashed password.
-- Database-backed session creation, validation, deletion, and integration tests
-  are implemented in Python.
-- Login/logout/current-user APIs and a Next.js login screen are implemented.
-- Organization-authorized conversation creation and message append APIs exist,
-  with persistent participants, ordered messages and integration tests.
-- Next.js is the frontend and calls the Python API over HTTP.
+- FastAPI/SQLAlchemy/Alembic owns authentication, organization authorization,
+  conversations, selected PDF scope, suggestions, approvals, handoffs and summaries.
+  Next.js owns the UI, browser audio capture and presentation state.
+- Opaque database sessions, login/logout and organization-authorized conversation
+  creation, ordered message persistence, retrieval and ending are implemented.
+- PDF upload, page extraction and authorized keyword search are implemented.
+  The suggestion agent can search and read selected documents with page evidence.
+- Browser tab and microphone capture, Realtime transcription relay, final-message
+  persistence and SSE automatic suggestion updates are implemented. Provider tests
+  and real API smoke checks exist; actual Meet plus physical microphone acceptance
+  and real-world latency targets remain unverified.
+- Approval and in-app handoff APIs, claim/respond authorization and idempotency,
+  ended-conversation summary generation/retry, and ID-only domain traces are merged.
+- Remaining UI integration, screenshot evidence and manual acceptance are tracked
+  separately from backend completion. Do not treat an open Draft PR as shipped.
+- See `docs/implementation-status.md` for the dated verification matrix, known
+  limitations and the next manual acceptance steps.
 
 ### Current design direction
 
