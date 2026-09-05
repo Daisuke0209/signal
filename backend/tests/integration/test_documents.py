@@ -1,12 +1,16 @@
+import asyncio
+import tempfile
 import uuid
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from threading import Barrier, Event, Timer
 from typing import cast
 
 import pytest
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx import ASGITransport, AsyncClient, Response
 from sqlalchemy import delete, func, select
 
 from signal_api import documents
@@ -280,6 +284,88 @@ def test_document_upload_enforces_organization_limit(
             )
             == 1
         )
+
+
+def test_concurrent_uploads_respect_organization_limit(
+    document_user: tuple[uuid.UUID, str], storage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization_id, email = document_user
+    settings = get_settings().model_copy(
+        update={
+            "document_storage_dir": storage,
+            "document_max_count_per_organization": 1,
+        }
+    )
+    monkeypatch.setattr(documents, "get_settings", lambda: settings)
+    barrier = Barrier(2)
+
+    def submit() -> int:
+        with TestClient(app) as client:
+            client.post("/auth/login", json={"email": email, "password": PASSWORD})
+            barrier.wait()
+            return upload(client, organization_id).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        statuses = list(executor.map(lambda _: submit(), range(2)))
+    assert sorted(statuses) == [201, 422]
+    with SessionLocal() as db:
+        assert (
+            db.scalar(
+                select(func.count())
+                .select_from(Document)
+                .where(Document.organization_id == organization_id)
+            )
+            == 1
+        )
+    assert len(list(storage.iterdir())) == 1
+
+
+def test_stalled_upload_does_not_block_health(
+    document_user: tuple[uuid.UUID, str], storage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    organization_id, email = document_user
+    entered = Event()
+    release = Event()
+    fallback_released = Event()
+    original_read = tempfile.SpooledTemporaryFile.read
+
+    def blocked_read(file: object, *args: object, **kwargs: object) -> object:
+        entered.set()
+        release.wait()
+        return original_read(file, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(tempfile.SpooledTemporaryFile, "read", blocked_read)
+
+    def fallback_release() -> None:
+        fallback_released.set()
+        release.set()
+
+    async def run() -> None:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post(
+                "/auth/login", json={"email": email, "password": PASSWORD}
+            )
+            upload_task = asyncio.create_task(
+                client.post(
+                    "/documents",
+                    data={"organization_id": str(organization_id)},
+                    files={"file": ("guide.pdf", b"%PDF-1.4\n", "application/pdf")},
+                )
+            )
+            timer = Timer(0.75, fallback_release)
+            timer.start()
+            try:
+                assert await asyncio.to_thread(entered.wait, 1)
+                health = await asyncio.wait_for(client.get("/health"), timeout=0.5)
+                assert health.status_code == 200
+                assert not fallback_released.is_set()
+            finally:
+                release.set()
+                timer.cancel()
+            assert (await asyncio.wait_for(upload_task, timeout=1)).status_code == 201
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize(
