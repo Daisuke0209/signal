@@ -49,6 +49,18 @@ def test_document_file_and_page_are_authorized(document_user: tuple[uuid.UUID, s
     assert missing_page.status_code == 404
 
 
+def test_document_source_rejects_not_ready_and_missing_blob(document_user: tuple[uuid.UUID, str]) -> None:
+    organization_id, email = document_user
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        document = Document(organization_id=organization_id, uploaded_by_user_id=user_id, filename="pending.pdf", content_type="application/pdf", byte_size=1, storage_key=str(uuid.uuid4()))
+        db.add(document); db.commit(); document_id = document.id
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        assert client.get(f"/documents/{document_id}/file").status_code == 409
+        assert client.get(f"/documents/{document_id}/pages/1").status_code == 409
+
+
 @pytest.fixture
 def document_user() -> Iterator[tuple[uuid.UUID, str]]:
     marker = uuid.uuid4()
