@@ -120,7 +120,6 @@ export const addMessage = (
     },
   );
 
-
 export type ApprovalEvidence = {
   document_id: string;
   document_name: string;
@@ -159,4 +158,33 @@ export const decideApproval = (
 ) =>
   json<ApprovalRequest>(`/conversations/approvals/${approvalId}/${decision}`, {
     method: "POST",
+  });
+
+export type Handoff = {
+  approval_request_id: string;
+  conversation_id: string;
+  target: string;
+  summary: string;
+  evidence: ApprovalEvidence[];
+  requested_by_user_id: string;
+  created_at: string;
+  status: "open" | "claimed" | "resolved";
+  assignee_user_id: string | null;
+  claimed_at: string | null;
+  response_content: string | null;
+  responded_by_user_id: string | null;
+  responded_at: string | null;
+  resolved_at: string | null;
+};
+
+export const listHandoffs = () => json<Handoff[]>("/handoffs");
+export const listConversationHandoffs = (conversationId: string) =>
+  json<Handoff[]>(`/conversations/${conversationId}/handoffs`);
+export const claimHandoff = (approvalId: string) =>
+  json<Handoff>(`/handoffs/${approvalId}/claim`, { method: "POST" });
+export const respondToHandoff = (approvalId: string, content: string) =>
+  json<Handoff>(`/handoffs/${approvalId}/respond`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content }),
   });
