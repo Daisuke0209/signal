@@ -316,6 +316,111 @@ def test_document_upload_rejects_invalid_input_without_storage(
         )
 
 
+def test_search_documents_scopes_and_ranks_japanese_pages(
+    document_user: tuple[uuid.UUID, str],
+) -> None:
+    organization_id, email = document_user
+    other_organization_id = uuid.uuid4()
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        assert user_id is not None
+        db.add(
+            Organization(
+                id=other_organization_id,
+                name="Other organization",
+                slug=f"other-{other_organization_id}",
+            )
+        )
+        db.flush()
+        ready = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="guide.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=str(uuid.uuid4()),
+            processing_status="ready",
+        )
+        pending = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="pending.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=str(uuid.uuid4()),
+        )
+        other_ready = Document(
+            organization_id=other_organization_id,
+            uploaded_by_user_id=user_id,
+            filename="other-guide.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=str(uuid.uuid4()),
+            processing_status="ready",
+        )
+        db.add_all([ready, pending, other_ready])
+        db.flush()
+        db.add_all(
+            [
+                DocumentPage(
+                    document_id=ready.id, page_number=1, content="営業支援の料金"
+                ),
+                DocumentPage(
+                    document_id=ready.id, page_number=2, content="料金と料金の詳細"
+                ),
+                DocumentPage(document_id=other_ready.id, page_number=1, content="料金"),
+            ]
+        )
+        db.commit()
+        ready_id = ready.id
+        other_ready_id = other_ready.id
+    try:
+        with TestClient(app) as client:
+            assert (
+                client.post(
+                    "/documents/search",
+                    json={"organization_id": str(organization_id), "query": "料金"},
+                ).status_code
+                == 401
+            )
+            client.post("/auth/login", json={"email": email, "password": PASSWORD})
+            response = client.post(
+                "/documents/search",
+                json={"organization_id": str(organization_id), "query": "料金"},
+            )
+            empty = client.post(
+                "/documents/search",
+                json={
+                    "organization_id": str(organization_id),
+                    "query": "料金",
+                    "document_ids": [],
+                },
+            )
+            denied = client.post(
+                "/documents/search",
+                json={"organization_id": str(other_organization_id), "query": "料金"},
+            )
+            selected = client.post(
+                "/documents/search",
+                json={
+                    "organization_id": str(organization_id),
+                    "query": "料金",
+                    "document_ids": [str(ready_id), str(other_ready_id)],
+                },
+            )
+        assert [row["page_number"] for row in response.json()] == [2, 1]
+        assert all(row["document_id"] == str(ready_id) for row in response.json())
+        assert empty.json() == []
+        assert denied.status_code == 403
+        assert all(row["document_id"] == str(ready_id) for row in selected.json())
+    finally:
+        with SessionLocal() as db:
+            other_organization = db.get(Organization, other_organization_id)
+            if other_organization is not None:
+                db.delete(other_organization)
+                db.commit()
+
+
 def test_extract_malformed_document_has_safe_failed_state(
     document_user: tuple[uuid.UUID, str], storage: Path
 ) -> None:
