@@ -84,7 +84,7 @@ function SuggestionItems({ suggestions }: { suggestions: Suggestion[] }) {
                   className={styles.source}
                   key={`${source.document_id}:${source.page_number}:${source.excerpt}`}
                 >
-                  <summary>{source.document_name} · p.{source.page_number}</summary>
+                  <summary><a href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/documents/${source.document_id}/file#page=${source.page_number}`} target="_blank" rel="noreferrer">{source.document_name} · p.{source.page_number}</a></summary>
                   <p>{source.excerpt}</p>
                 </details>
               ))}
