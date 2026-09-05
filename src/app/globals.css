@@ -1,42 +1,47 @@
 :root {
-  --background: #f6f7f5;
+  --background: #f6f7f9;
   --surface: #ffffff;
-  --text-primary: #1b1f1d;
-  --text-secondary: #555d59;
-  --text-muted: #7c8480;
-  --text-faint: #a3a9a6;
-  --accent: #246b50;
-  --accent-soft: #edf5f1;
-  --border: #e5e8e6;
-  --border-strong: #d7dcd9;
+  --text-primary: #263040;
+  --text-secondary: #596578;
+  --text-muted: #7c8797;
+  --accent: #526f9e;
+  --border: #eceef2;
+  --border-strong: #dce1e8;
 }
-
 html,
 body {
   min-height: 100%;
 }
-
 body {
   color: var(--text-primary);
   background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    var(--font-geist-sans),
+    -apple-system,
+    BlinkMacSystemFont,
+    "Hiragino Sans",
+    "Noto Sans JP",
+    sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-
 * {
   box-sizing: border-box;
   padding: 0;
   margin: 0;
 }
-
 button,
-input {
+input,
+select {
   font: inherit;
 }
-
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 3px;
+}
+::selection {
+  background: #dfe8f6;
 }
