@@ -52,8 +52,23 @@ feature completeness.
 - Avoid generating large amounts of code at once.
 - The user has authorized direct implementation, GitHub Issue/PR creation, and
   reviewed merges for the agreed product scope.
-- Use three GPT-5.6 Terra subagents for Issue planning, sequential implementation,
-  and independent review/merge, with the parent coordinating architecture.
+- Use GPT-5.6 Terra for every subagent. Two implementation lanes cover the
+  conversation/audio/agent UI and PDF/search capabilities; a separate reviewer
+  handles review/merge. The PDF implementer also owns Issue creation within the
+  available concurrency limit. The parent coordinates architecture and ordering.
+- When implementation or review discovers additional required work, send its
+  rationale, scope, acceptance criteria, dependencies and blocking status to the
+  Issue owner. The Issue owner checks existing Issues before creating one, and
+  the parent prioritizes it. Fixes needed by an existing Issue stay in its PR.
+- Every UI-changing Issue must contain a screenshot of the actual running app
+  with test data. Link the Issue from the PR; the reviewer verifies the screenshot
+  reflects the final UI before merge. Use immutable image URLs so branch cleanup
+  does not break the image. Never publish credentials or customer data.
+- After merge, verify the linked Issue is closed and delete the remote work
+  branch. The owner switches a clean worktree away from the merged branch and
+  safely deletes the local branch without discarding uncommitted work.
+- Report open Issues, newly created Issues/PRs, merged PRs and estimated remaining
+  time every ten minutes. This run's baseline is GitHub Issue/PR number 22.
 - Keep Issues and PRs small and functional. Use isolated worktrees, communicate
   dependencies, and review/test the exact PR head before merging.
 - Record meaningful architectural decisions and their tradeoffs in the repo.
