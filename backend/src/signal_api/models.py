@@ -3,10 +3,13 @@ from datetime import datetime
 from enum import StrEnum
 
 from sqlalchemy import (
+    CheckConstraint,
     DateTime,
     Enum,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
+    Integer,
     PrimaryKeyConstraint,
     String,
     Text,
@@ -139,6 +142,152 @@ class Membership(Base):
         nullable=False,
         server_default=text("'rep'"),
     )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class ConversationStatus(StrEnum):
+    ACTIVE = "active"
+    ENDED = "ended"
+
+
+conversation_status_type = Enum(
+    ConversationStatus,
+    name="conversation_status",
+    values_callable=lambda members: [member.value for member in members],
+)
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+    __table_args__ = (
+        Index("conversations_organization_id_idx", "organization_id"),
+        Index("conversations_created_by_user_id_idx", "created_by_user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "organizations.id",
+            name="conversations_organization_id_organizations_id_fk",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    created_by_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "users.id",
+            name="conversations_created_by_user_id_users_id_fk",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    status: Mapped[ConversationStatus] = mapped_column(
+        conversation_status_type,
+        nullable=False,
+        server_default=text("'active'"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class ConversationParticipantSide(StrEnum):
+    CUSTOMER = "customer"
+    SALES_REP = "sales_rep"
+
+
+conversation_participant_side_type = Enum(
+    ConversationParticipantSide,
+    name="conversation_participant_side",
+    values_callable=lambda members: [member.value for member in members],
+)
+
+
+class ConversationParticipant(Base):
+    __tablename__ = "conversation_participants"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "id",
+            name="conversation_participants_conversation_id_id_unique",
+        ),
+        Index("conversation_participants_conversation_id_idx", "conversation_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "conversations.id",
+            name="conversation_participants_conversation_id_conversations_id_fk",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+    side: Mapped[ConversationParticipantSide] = mapped_column(
+        conversation_participant_side_type,
+        nullable=False,
+    )
+    display_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "sequence_number",
+            name="conversation_messages_conversation_id_sequence_number_unique",
+        ),
+        CheckConstraint(
+            "sequence_number > 0",
+            name="conversation_messages_sequence_number_positive",
+        ),
+        ForeignKeyConstraint(
+            ["conversation_id", "participant_id"],
+            [
+                "conversation_participants.conversation_id",
+                "conversation_participants.id",
+            ],
+            name="conversation_messages_participant_fk",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        server_default=text("gen_random_uuid()"),
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    participant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False
+    )
+    sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
