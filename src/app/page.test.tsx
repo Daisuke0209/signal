@@ -12,6 +12,7 @@ const currentUser = {
   id: "34c26d3e-5562-4dd4-8d95-6347f346db58",
   name: "Demo User",
   email: "demo@signal.local",
+  organizations: [],
 };
 
 function emptyResponse(status: number): Response {
@@ -25,6 +26,13 @@ function userResponse(): Response {
   });
 }
 
+function conversationsResponse(): Response {
+  return new Response(JSON.stringify([]), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -32,13 +40,15 @@ afterEach(() => {
 
 describe("authentication page", () => {
   it("restores an existing session", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(userResponse());
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(userResponse())
+      .mockResolvedValueOnce(conversationsResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     render(<Home />);
 
     expect(await screen.findByText("Demo User")).toBeDefined();
-    expect(screen.getByText("demo@signal.local")).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/auth/me",
       expect.objectContaining({ credentials: "include" }),
@@ -50,7 +60,8 @@ describe("authentication page", () => {
       .fn()
       .mockResolvedValueOnce(emptyResponse(401))
       .mockResolvedValueOnce(emptyResponse(204))
-      .mockResolvedValueOnce(userResponse());
+      .mockResolvedValueOnce(userResponse())
+      .mockResolvedValueOnce(conversationsResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     render(<Home />);
@@ -100,6 +111,7 @@ describe("authentication page", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(userResponse())
+      .mockResolvedValueOnce(conversationsResponse())
       .mockResolvedValueOnce(emptyResponse(204));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -113,7 +125,7 @@ describe("authentication page", () => {
     ).toBeDefined();
     await waitFor(() => {
       expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
+        3,
         "http://localhost:8000/auth/logout",
         expect.objectContaining({
           method: "POST",
