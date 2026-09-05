@@ -6,6 +6,14 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const audioMocks = vi.hoisted(() => ({ start: vi.fn() }));
+vi.mock("@/lib/audio-capture", () => ({
+  startAudioCapture: audioMocks.start,
+  captureFailure: () => "cancelled",
+  stopStream: (stream: MediaStream | null) =>
+    stream?.getTracks().forEach((track) => track.stop()),
+}));
 import Home from "./page";
 
 const currentUser = {
@@ -43,9 +51,146 @@ function jsonResponse(value: unknown): Response {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  audioMocks.start.mockReset();
 });
 
 describe("authentication page", () => {
+  it("stops both sources and updates the UI when a source track ends", async () => {
+    const listeners = new Map<string, () => void>();
+    const tabTrack = {
+      stop: vi.fn(),
+      addEventListener: vi.fn((name: string, callback: () => void) =>
+        listeners.set(name, callback),
+      ),
+    } as unknown as MediaStreamTrack;
+    const micTrack = {
+      stop: vi.fn(),
+      addEventListener: vi.fn((name: string, callback: () => void) =>
+        listeners.set(`mic-${name}`, callback),
+      ),
+    } as unknown as MediaStreamTrack;
+    audioMocks.start.mockResolvedValue({
+      displayStream: {
+        getTracks: () => [tabTrack],
+        getAudioTracks: () => [tabTrack],
+      },
+      microphoneStream: {
+        getTracks: () => [micTrack],
+        getAudioTracks: () => [micTrack],
+      },
+    });
+    const user = {
+      ...currentUser,
+      organizations: [
+        { id: "org-1", name: "Demo", slug: "demo", role: "admin" },
+      ],
+    };
+    const detail = {
+      id: "conversation-1",
+      organization_id: "org-1",
+      created_by_user_id: currentUser.id,
+      status: "active",
+      created_at: "2026-09-05T12:00:00Z",
+      participants: [],
+      messages: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(user))
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              id: detail.id,
+              organization_id: detail.organization_id,
+              status: detail.status,
+              created_at: detail.created_at,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(jsonResponse(detail)),
+    );
+    render(<Home />);
+    await screen.findByText("進行中の商談");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Meet音声とマイクを取得" }),
+    );
+    await screen.findByText("共有音声・マイクを取得中");
+    listeners.get("ended")?.();
+    expect(await screen.findByText("共有音声が終了しました。")).toBeDefined();
+    expect(screen.getByText("停止中")).toBeDefined();
+    expect(tabTrack.stop).toHaveBeenCalled();
+    expect(micTrack.stop).toHaveBeenCalled();
+  });
+
+  it("stops streams that resolve after the workspace unmounts", async () => {
+    let resolveCapture: ((value: unknown) => void) | undefined;
+    audioMocks.start.mockReturnValue(
+      new Promise((resolve) => {
+        resolveCapture = resolve;
+      }),
+    );
+    const tabTrack = {
+      stop: vi.fn(),
+      addEventListener: vi.fn(),
+    } as unknown as MediaStreamTrack;
+    const micTrack = {
+      stop: vi.fn(),
+      addEventListener: vi.fn(),
+    } as unknown as MediaStreamTrack;
+    const user = {
+      ...currentUser,
+      organizations: [
+        { id: "org-1", name: "Demo", slug: "demo", role: "admin" },
+      ],
+    };
+    const detail = {
+      id: "conversation-1",
+      organization_id: "org-1",
+      created_by_user_id: currentUser.id,
+      status: "active",
+      created_at: "2026-09-05T12:00:00Z",
+      participants: [],
+      messages: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(user))
+        .mockResolvedValueOnce(
+          jsonResponse([
+            {
+              id: detail.id,
+              organization_id: detail.organization_id,
+              status: detail.status,
+              created_at: detail.created_at,
+            },
+          ]),
+        )
+        .mockResolvedValueOnce(jsonResponse(detail)),
+    );
+    const view = render(<Home />);
+    await screen.findByText("進行中の商談");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Meet音声とマイクを取得" }),
+    );
+    view.unmount();
+    resolveCapture?.({
+      displayStream: {
+        getTracks: () => [tabTrack],
+        getAudioTracks: () => [tabTrack],
+      },
+      microphoneStream: {
+        getTracks: () => [micTrack],
+        getAudioTracks: () => [micTrack],
+      },
+    });
+    await Promise.resolve();
+    expect(tabTrack.stop).toHaveBeenCalled();
+    expect(micTrack.stop).toHaveBeenCalled();
+  });
   it("renders an existing conversation in message order", async () => {
     const fetchMock = vi
       .fn()
