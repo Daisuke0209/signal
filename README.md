@@ -112,6 +112,7 @@ npm run dev:api
 
 ```bash
 npm run lint
+npm test
 npm run lint:api
 npm run format:api:check
 npm run typecheck:api
@@ -138,6 +139,7 @@ uv run --directory backend alembic -c alembic.ini revision --autogenerate -m "de
 | `npm run dev:api` | FastAPIバックエンドを起動する |
 | `npm run build` | Next.jsを本番用にビルドする |
 | `npm run lint` | フロントエンドのESLintを実行する |
+| `npm test` | フロントエンドのVitestテストを実行する |
 | `npm run lint:api` | PythonバックエンドのRuffを実行する |
 | `npm run format:api:check` | Pythonコードのフォーマットを確認する |
 | `npm run typecheck:api` | Pythonバックエンドのmypyを実行する |
