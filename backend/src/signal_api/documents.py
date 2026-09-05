@@ -260,3 +260,20 @@ def extract_document(
         document.processing_error = None
     db.commit()
     return to_document_response(document, db)
+
+
+@router.post("/{document_id}/retry", response_model=DocumentResponse)
+def retry_document(
+    document_id: uuid.UUID, db: DatabaseSession, current_user: CurrentUser
+) -> DocumentResponse:
+    document = db.scalar(
+        select(Document).where(Document.id == document_id).with_for_update()
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    require_membership(document.organization_id, current_user.id, db)
+    if document.processing_status is DocumentProcessingStatus.READY:
+        return to_document_response(document, db)
+    if document.processing_status is DocumentProcessingStatus.PROCESSING:
+        raise HTTPException(status_code=409, detail="Document is already processing")
+    return extract_document(document_id, db, current_user)
