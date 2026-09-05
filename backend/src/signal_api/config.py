@@ -1,7 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     document_max_count_per_organization: int = 100
     openai_api_key: SecretStr | None = None
     transcription_model: str = "gpt-live-transcribe"
+    transcription_energy_threshold: float = Field(default=0.005, gt=0, le=1)
 
     @property
     def sqlalchemy_database_url(self) -> str:
