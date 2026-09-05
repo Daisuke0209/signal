@@ -690,3 +690,181 @@
 
 .message[data-partial="true"] { opacity: .72; border-left: 2px solid #809286; }
 .speaker small { margin-left: auto; font-size: 11px; font-weight: 400; color: #708078; }
+.approvalSection {
+  padding: 24px 4px 4px;
+}
+.approvalToggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #51617b;
+  font-size: 12px;
+  font-weight: 550;
+}
+.approvalToggle > span:first-child {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+.approvalToggle > span:first-child > span {
+  font-size: 17px;
+}
+.approvalToggle > span:last-child {
+  color: #758096;
+  font-size: 11px;
+  font-weight: 400;
+}
+.approvalPanel {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+.approvalForm {
+  display: grid;
+  gap: 9px;
+  padding: 14px;
+  border: 1px solid #dce2e9;
+  border-radius: 9px;
+  background: #fafbfd;
+}
+.approvalForm > p,
+.approvalEmpty {
+  color: #68758a;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.approvalForm label {
+  display: grid;
+  gap: 5px;
+  color: #5c697b;
+  font-size: 11px;
+}
+.approvalForm input,
+.approvalForm textarea {
+  width: 100%;
+  border: 1px solid #cfd7e2;
+  border-radius: 6px;
+  background: white;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+}
+.approvalForm input {
+  min-height: 34px;
+  padding: 7px 8px;
+}
+.approvalForm textarea {
+  min-height: 70px;
+  padding: 8px;
+  resize: vertical;
+}
+.approvalForm button,
+.approvalActions button {
+  min-height: 34px;
+  border: 1px solid #344359;
+  border-radius: 6px;
+  background: #344359;
+  color: white;
+  font-size: 11px;
+}
+.approvalList {
+  display: grid;
+  gap: 10px;
+}
+.approvalItem {
+  padding: 13px;
+  border: 1px solid #dfe4eb;
+  border-radius: 9px;
+  background: white;
+}
+.approvalItemHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #3e4b60;
+  font-size: 12px;
+}
+.approvalItemHead > span {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #f5f0e5;
+  color: #75622d;
+  font-size: 10px;
+}
+.approvalItemHead > span[data-status="approved"] {
+  background: #edf6f1;
+  color: #347058;
+}
+.approvalItemHead > span[data-status="rejected"] {
+  background: #fbefef;
+  color: #934a4a;
+}
+.approvalItem dl {
+  display: grid;
+  gap: 7px;
+  margin-top: 13px;
+}
+.approvalItem dl > div {
+  display: grid;
+  gap: 3px;
+}
+.approvalItem dt {
+  color: #7c8797;
+  font-size: 10px;
+}
+.approvalItem dd {
+  margin: 0;
+  color: #4c596b;
+  font-size: 12px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.approvalEvidence {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+}
+.approvalEvidence > p {
+  color: #7c8797;
+  font-size: 10px;
+}
+.approvalEvidence details {
+  padding: 6px 8px;
+  border: 1px solid #e0e5ec;
+  border-radius: 5px;
+  background: #fafbfd;
+}
+.approvalEvidence summary {
+  cursor: pointer;
+  color: #546d91;
+  font-size: 10px;
+}
+.approvalEvidence details p {
+  margin-top: 6px;
+  color: #68758a;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.approvalActions {
+  display: flex;
+  gap: 7px;
+  margin-top: 14px;
+}
+.approvalActions button:last-child {
+  border-color: #dfcccc;
+  background: white;
+  color: #944a4a;
+}
+.approvalError {
+  padding: 9px 10px;
+  border-radius: 6px;
+  background: #fff1f0;
+  color: #94423c;
+  font-size: 11px;
+  line-height: 1.6;
+}
