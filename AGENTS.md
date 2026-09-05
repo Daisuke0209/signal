@@ -10,7 +10,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Project context
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
 ### Product
 
@@ -18,8 +18,10 @@ The application is named **Signal**.
 
 Signal is a real-time sales-assistance application. It understands an ongoing
 customer conversation and suggests what the sales representative should ask or
-say next. When necessary, it retrieves internal product information through RAG
-and shows supporting evidence.
+say next. It captures Google Meet tab audio and the representative's microphone on Mac,
+transcribes the conversation, and automatically suggests questions, responses,
+and confirmation items. An agent searches previously uploaded PDFs and shows
+document/page evidence. Signal is intended for real use as well as learning.
 
 ### Primary goal
 
@@ -48,8 +50,12 @@ feature completeness.
 - Before implementation, explain why the proposed design fits and what the
   reasonable alternatives are.
 - Avoid generating large amounts of code at once.
-- Prefer guiding the user through commands and implementation so they can do the
-  work themselves. Make changes directly only when the user explicitly asks.
+- The user has authorized direct implementation, GitHub Issue/PR creation, and
+  reviewed merges for the agreed product scope.
+- Use three GPT-5.6 Terra subagents for Issue planning, sequential implementation,
+  and independent review/merge, with the parent coordinating architecture.
+- Keep Issues and PRs small and functional. Use isolated worktrees, communicate
+  dependencies, and review/test the exact PR head before merging.
 - Record meaningful architectural decisions and their tradeoffs in the repo.
 
 ### GitHub issue format
@@ -66,7 +72,7 @@ feature completeness.
 - persistent conversation state
 - suggested next questions
 - suggested next responses
-- RAG over internal product information, with evidence
+- agentic search over preuploaded PDFs, with document/page evidence
 - tool calling
 - user approval before side effects
 - authentication and authorization
@@ -74,19 +80,27 @@ feature completeness.
 - failure handling
 - logging and tracing
 
-### Agreed implementation order
+### Agreed implementation direction
 
-1. Authentication and database-backed session management
-2. Text-based conversations and conversation state
-3. LLM-generated question and response suggestions
-4. RAG with source attribution
-5. Real-time transcription
-6. Tool calling and approval flows
-7. Human handoff and failure handling
-8. Logging, tracing, and evaluation
+The 2026-09-05 product agreement supersedes the earlier text-first milestone.
+Live transcription and PDF access are part of the initial usable application.
 
-Starting with manually entered text keeps the initial agent and state-management
-work independent from speech-provider and real-time transport complexity.
+1. Finish conversation read/lifecycle APIs and the desktop sales workspace.
+2. Add PDF registration, page extraction, authorized search and source viewing.
+3. Capture Google Meet tab audio and microphone audio on Mac Chrome and persist
+   live transcripts. Text input remains a diagnostic/recovery path.
+4. Automatically orchestrate PDF investigation and question/response/confirmation
+   suggestions; preserve current conversation state and reject stale results.
+5. Complete approved in-app confirmation requests, human handoff, recovery,
+   traces, and end-to-end verification.
+
+Use a minimalist light UI on a full second monitor: transcript on the left,
+next questions, response examples and confirmation items on the right. Keep
+PDF management and conversation history in separate views.
+
+See `docs/product-and-architecture.md` for the agreed experience, responsibility
+boundaries, tradeoffs and acceptance checklist. Features in that document are
+planned until their individual Issues are implemented and verified.
 
 ### Current status
 
@@ -97,16 +111,17 @@ work independent from speech-provider and real-time transport complexity.
   membership with a hashed password.
 - Database-backed session creation, validation, deletion, and integration tests
   are implemented in Python.
+- Login/logout/current-user APIs and a Next.js login screen are implemented.
+- Organization-authorized conversation creation and message append APIs exist,
+  with persistent participants, ordered messages and integration tests.
 - Next.js is the frontend and calls the Python API over HTTP.
 
 ### Current design direction
 
-For the authentication milestone, compare a framework-managed approach such as
-Auth.js with an opaque, database-backed session token. The database-backed
-option is the initial preference for this educational project because it makes
-session lifecycle, cookie security, revocation, and Auth/AuthZ boundaries
-explicit. Revisit this decision before implementation and document the final
-choice rather than treating it as settled architecture.
+Authentication uses the existing opaque database-backed session token. This
+keeps expiration, revocation and Auth/AuthZ boundaries explicit for learning.
+Framework-managed authentication remains a future alternative if operational
+needs outweigh that educational benefit; do not rebuild existing auth now.
 
 Keep backend application logic in `backend/src/signal_api`. Use FastAPI for the
 HTTP boundary, SQLAlchemy for persistence, Alembic for migrations, pytest for
