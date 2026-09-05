@@ -1,3 +1,4 @@
+import { recordReceived } from "./browser-observations";
 import type { AudioCapture } from "./audio-capture";
 import type { ConversationDetail } from "./auth-api";
 
@@ -6,6 +7,7 @@ export type TranscriptEvent = {
   type: "partial" | "final";
   source: Source;
   item_id: string;
+  session_id?: string;
   text: string;
   side: "sales_rep" | "customer";
   message: ConversationDetail["messages"][number] | null;
@@ -91,6 +93,7 @@ export async function startLiveTranscription(
           if (event.type === "ready") {
             clearTimeout(timeout); resolve();
           } else if (event.type === "partial" || event.type === "final") {
+            recordReceived(event as TranscriptEvent);
             onTranscript(event as TranscriptEvent);
           } else if (event.type === "stopped") {
             cleanStop = true; resolveStopped();

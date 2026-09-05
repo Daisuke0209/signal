@@ -14,6 +14,8 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from signal_api.domain_traces import span
+
 
 class AgentFailure(Exception):
     """Only a fixed code crosses the service boundary; no provider error bodies."""
@@ -126,29 +128,30 @@ class SuggestionAgent:
         for _ in range(3):
             await report_phase(AgentPhase.GENERATING)
             tools = [SEARCH_TOOL] if search is not None and searches < 2 else []
-            response = await self.client.post(
-                "https://api.openai.com/v1/responses",
-                headers={"Authorization": f"Bearer {self.api_key}"},
-                json={
-                    "model": self.model,
-                    "store": False,
-                    "instructions": INSTRUCTIONS,
-                    "input": inputs,
-                    "tools": tools,
-                    "parallel_tool_calls": False,
-                    "max_output_tokens": 2500,
-                    "reasoning": {"effort": "low"},
-                    "text": {
-                        "format": {
-                            "type": "json_schema",
-                            "name": "sales_suggestions",
-                            "strict": True,
-                            "schema": AgentOutput.model_json_schema(),
-                        }
+            with span("provider.responses"):
+                response = await self.client.post(
+                    "https://api.openai.com/v1/responses",
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    json={
+                        "model": self.model,
+                        "store": False,
+                        "instructions": INSTRUCTIONS,
+                        "input": inputs,
+                        "tools": tools,
+                        "parallel_tool_calls": False,
+                        "max_output_tokens": 2500,
+                        "reasoning": {"effort": "low"},
+                        "text": {
+                            "format": {
+                                "type": "json_schema",
+                                "name": "sales_suggestions",
+                                "strict": True,
+                                "schema": AgentOutput.model_json_schema(),
+                            }
+                        },
                     },
-                },
-            )
-            response.raise_for_status()
+                )
+                response.raise_for_status()
             body = response.json()
             if body.get("status") != "completed":
                 raise AgentFailure()

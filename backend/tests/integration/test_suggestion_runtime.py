@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import Iterator
 
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
 
+from signal_api import domain_traces
 from signal_api.config import get_settings
 from signal_api.database import SessionLocal
 from signal_api.main import app
@@ -86,8 +88,11 @@ def message(
 
 
 def test_final_message_automatically_pushes_ordered_states_and_persists_result(
-    actor: Actor, monkeypatch: pytest.MonkeyPatch
+    actor: Actor, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    log = logging.getLogger("signal_test.runtime")
+    monkeypatch.setattr(domain_traces, "logger", log)
+    caplog.set_level(logging.INFO, logger=log.name)
     client, cid, _, _, _ = actor
     monkeypatch.setattr(get_settings(), "suggestions_enabled", True)
 
@@ -153,6 +158,22 @@ def test_final_message_automatically_pushes_ordered_states_and_persists_result(
                 await runtime.close()
 
     asyncio.run(scenario())
+    records = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == log.name
+    ]
+    assert {r["event"] for r in records} >= {
+        "suggestion.queued",
+        "suggestion.prepare",
+        "provider.responses",
+        "suggestion.persist",
+    }
+    assert all(
+        r["conversation_id"] == str(cid) and r["generation"] == 1 for r in records
+    )
+    assert len({r["run_id"] for r in records}) == 1
+    assert "SSOについて" not in caplog.text
 
 
 def test_newer_input_prevents_old_generation_result_publication(actor: Actor) -> None:

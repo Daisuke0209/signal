@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 import uuid
 from collections.abc import Callable
 
@@ -13,6 +14,7 @@ from sqlalchemy.orm import Session
 from signal_api.config import get_settings
 from signal_api.database import SessionLocal
 from signal_api.documents import search_document_pages
+from signal_api.domain_traces import span, trace, trace_context
 from signal_api.models import (
     Conversation,
     ConversationMessage,
@@ -91,7 +93,9 @@ class SuggestionRuntime:
             if previous[0] >= generation:
                 return
             previous[1].cancel()
-        task = asyncio.create_task(self.work(cid, rid))
+        with trace_context(cid, run_id=rid, generation=generation):
+            trace("suggestion.queued")
+            task = asyncio.create_task(self.work(cid, rid))
         self.tasks[cid] = (generation, task)
 
         def finished(done: asyncio.Task[None]) -> None:
@@ -251,15 +255,27 @@ class SuggestionRuntime:
                 fail_suggestion_run(db, rid, SuggestionErrorCode(code))
 
         await asyncio.to_thread(transaction, mark)
+        trace(
+            "suggestion.failure",
+            outcome="failed",
+            error_code=code,
+            retryable=code in {"timeout", "provider_unavailable", "generation_failed"},
+        )
         await self.publish(cid)
 
     async def work(self, cid: uuid.UUID, rid: uuid.UUID) -> None:
         try:
+            queued = time.perf_counter()
             await self.publish(cid)
             async with self.capacity:
-                prepared = await asyncio.to_thread(
-                    transaction, lambda db: self.prepare(db, cid, rid)
+                trace(
+                    "suggestion.queue_wait",
+                    duration_ms=(time.perf_counter() - queued) * 1000,
                 )
+                with span("suggestion.prepare"):
+                    prepared = await asyncio.to_thread(
+                        transaction, lambda db: self.prepare(db, cid, rid)
+                    )
                 await self.publish(cid)
                 if prepared is None:
                     return
@@ -280,14 +296,20 @@ class SuggestionRuntime:
                             )
                         ]
 
-                    return await asyncio.to_thread(transaction, lookup)
+                    with span("suggestion.search"):
+                        result = await asyncio.to_thread(transaction, lookup)
+                    trace("suggestion.search_results", count=len(result))
+                    return result
 
-                output, evidence = await self.agent.generate(
-                    context, search if available else None, report
-                )
-                await asyncio.to_thread(
-                    transaction, lambda db: self.finish(db, cid, rid, output, evidence)
-                )
+                with span("suggestion.generate"):
+                    output, evidence = await self.agent.generate(
+                        context, search if available else None, report
+                    )
+                with span("suggestion.persist"):
+                    await asyncio.to_thread(
+                        transaction,
+                        lambda db: self.finish(db, cid, rid, output, evidence),
+                    )
                 await self.publish(cid)
         except asyncio.CancelledError:
             await self.fail(cid, rid, "interrupted")

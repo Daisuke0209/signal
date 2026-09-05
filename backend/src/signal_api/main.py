@@ -14,6 +14,7 @@ from signal_api.config import get_settings
 from signal_api.conversations import router as conversations_router
 from signal_api.database import get_db_session
 from signal_api.documents import router as documents_router
+from signal_api.domain_traces import configure_domain_logging
 from signal_api.observability import (
     RequestLoggingMiddleware,
     configure_request_logging,
@@ -21,11 +22,13 @@ from signal_api.observability import (
 from signal_api.suggestion_runtime import SuggestionRuntime, create_agent
 from signal_api.suggestion_stream import router as suggestion_stream_router
 from signal_api.suggestions import router as suggestions_router
+from signal_api.trace_routes import router as trace_router
 from signal_api.transcription_routes import router as transcription_router
 
 settings = get_settings()
 
 configure_request_logging()
+configure_domain_logging()
 
 
 @asynccontextmanager
@@ -52,6 +55,7 @@ app.include_router(documents_router)
 app.include_router(suggestions_router)
 app.include_router(suggestion_stream_router)
 app.include_router(transcription_router)
+app.include_router(trace_router)
 
 app.add_middleware(
     CORSMiddleware,

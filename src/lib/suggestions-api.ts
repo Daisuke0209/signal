@@ -1,3 +1,5 @@
+import { recordReceived } from "./browser-observations";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type SuggestionKind = "question" | "response" | "confirmation";
@@ -34,6 +36,7 @@ export type SuggestionRun = {
 };
 
 export type SuggestionState = {
+  delivery?: "snapshot" | "live";
   conversation_id: string;
   latest_run: SuggestionRun | null;
 };
@@ -69,7 +72,9 @@ export function connectSuggestionEvents(
 
   events.addEventListener("suggestion_state", (event) => {
     try {
-      onState(JSON.parse((event as MessageEvent<string>).data) as SuggestionState);
+      const state = JSON.parse((event as MessageEvent<string>).data) as SuggestionState;
+      if (state.delivery === "live" && state.latest_run) recordReceived(state.latest_run);
+      onState(state);
     } catch {
       onConnectionError();
     }
