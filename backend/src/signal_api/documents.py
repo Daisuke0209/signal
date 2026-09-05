@@ -154,7 +154,9 @@ def require_membership(
         raise HTTPException(status_code=403, detail="Not a member of this organization")
 
 
-def authorized_ready_document(document_id: uuid.UUID, db: Session, user: CurrentUser) -> Document:
+def authorized_ready_document(
+    document_id: uuid.UUID, db: Session, user: CurrentUser
+) -> Document:
     document = db.get(Document, document_id)
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -165,21 +167,43 @@ def authorized_ready_document(document_id: uuid.UUID, db: Session, user: Current
 
 
 @router.get("/{document_id}/file")
-def get_document_file(document_id: uuid.UUID, db: DatabaseSession, current_user: CurrentUser) -> FileResponse:
+def get_document_file(
+    document_id: uuid.UUID, db: DatabaseSession, current_user: CurrentUser
+) -> FileResponse:
     document = authorized_ready_document(document_id, db, current_user)
     path = get_settings().document_storage_dir / document.storage_key
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Document file not found")
-    return FileResponse(path, media_type="application/pdf", filename=document.filename, content_disposition_type="inline")
+    return FileResponse(
+        path,
+        media_type="application/pdf",
+        filename=document.filename,
+        content_disposition_type="inline",
+    )
 
 
 @router.get("/{document_id}/pages/{page_number}", response_model=DocumentPageResponse)
-def get_document_page(document_id: uuid.UUID, page_number: int, db: DatabaseSession, current_user: CurrentUser) -> DocumentPageResponse:
+def get_document_page(
+    document_id: uuid.UUID,
+    page_number: int,
+    db: DatabaseSession,
+    current_user: CurrentUser,
+) -> DocumentPageResponse:
     document = authorized_ready_document(document_id, db, current_user)
-    page = db.scalar(select(DocumentPage).where(DocumentPage.document_id == document.id, DocumentPage.page_number == page_number))
+    page = db.scalar(
+        select(DocumentPage).where(
+            DocumentPage.document_id == document.id,
+            DocumentPage.page_number == page_number,
+        )
+    )
     if page is None:
         raise HTTPException(status_code=404, detail="Document page not found")
-    return DocumentPageResponse(document_id=document.id, document_name=document.filename, page_number=page.page_number, content=page.content)
+    return DocumentPageResponse(
+        document_id=document.id,
+        document_name=document.filename,
+        page_number=page.page_number,
+        content=page.content,
+    )
 
 
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)

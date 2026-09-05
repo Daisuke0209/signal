@@ -30,31 +30,62 @@ from signal_api.security import hash_password
 PASSWORD = "document-api-test-password"
 
 
-def test_document_file_and_page_are_authorized(document_user: tuple[uuid.UUID, str], storage: Path) -> None:
+def test_document_file_and_page_are_authorized(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
     organization_id, email = document_user
     key = str(uuid.uuid4())
     (storage / key).write_bytes(b"%PDF-1.4\n")
     with SessionLocal() as db:
         user_id = db.scalar(select(User.id).where(User.email == email))
-        document = Document(organization_id=organization_id, uploaded_by_user_id=user_id, filename="guide.pdf", content_type="application/pdf", byte_size=9, storage_key=key, processing_status="ready")
-        db.add(document); db.flush(); db.add(DocumentPage(document_id=document.id, page_number=1, content="本文")); db.commit(); document_id = document.id
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="guide.pdf",
+            content_type="application/pdf",
+            byte_size=9,
+            storage_key=key,
+            processing_status="ready",
+        )
+        db.add(document)
+        db.flush()
+        db.add(DocumentPage(document_id=document.id, page_number=1, content="本文"))
+        db.commit()
+        document_id = document.id
     with TestClient(app) as client:
         client.post("/auth/login", json={"email": email, "password": PASSWORD})
         file_response = client.get(f"/documents/{document_id}/file")
         page_response = client.get(f"/documents/{document_id}/pages/1")
         missing_page = client.get(f"/documents/{document_id}/pages/0")
-    assert file_response.status_code == 200 and file_response.headers["content-type"] == "application/pdf"
+    assert (
+        file_response.status_code == 200
+        and file_response.headers["content-type"] == "application/pdf"
+    )
     assert key not in file_response.text
-    assert page_response.json()["content"] == "本文" and "storage" not in page_response.text
+    assert (
+        page_response.json()["content"] == "本文"
+        and "storage" not in page_response.text
+    )
     assert missing_page.status_code == 404
 
 
-def test_document_source_rejects_not_ready_and_missing_blob(document_user: tuple[uuid.UUID, str]) -> None:
+def test_document_source_rejects_not_ready_and_missing_blob(
+    document_user: tuple[uuid.UUID, str],
+) -> None:
     organization_id, email = document_user
     with SessionLocal() as db:
         user_id = db.scalar(select(User.id).where(User.email == email))
-        document = Document(organization_id=organization_id, uploaded_by_user_id=user_id, filename="pending.pdf", content_type="application/pdf", byte_size=1, storage_key=str(uuid.uuid4()))
-        db.add(document); db.commit(); document_id = document.id
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="pending.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=str(uuid.uuid4()),
+        )
+        db.add(document)
+        db.commit()
+        document_id = document.id
     with TestClient(app) as client:
         client.post("/auth/login", json={"email": email, "password": PASSWORD})
         assert client.get(f"/documents/{document_id}/file").status_code == 409
