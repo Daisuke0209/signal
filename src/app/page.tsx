@@ -141,6 +141,14 @@ export default function Home() {
   const [approvalError, setApprovalError] = useState("");
   const [handoffTarget, setHandoffTarget] = useState("営業支援");
   const [handoffSummary, setHandoffSummary] = useState("");
+  const approvalGeneration = useRef(0);
+  function resetApprovals() {
+    approvalGeneration.current += 1;
+    setApprovals([]);
+    setApprovalsOpen(false);
+    setApprovalsLoaded(false);
+    setApprovalError("");
+  }
   function stopCapture() {
     captureGeneration.current += 1;
     liveAbort.current?.abort();
@@ -306,6 +314,7 @@ export default function Home() {
       stopCapture();
       setSuggestionRun(null);
       setSuggestionConnectionError(false);
+      resetApprovals();
       setConversation(null);
       setItems([]);
       setUser(null);
@@ -368,10 +377,7 @@ export default function Home() {
     setShowManualInput(false);
     setSuggestionRun(null);
     setSuggestionConnectionError(false);
-    setApprovals([]);
-    setApprovalsOpen(false);
-    setApprovalsLoaded(false);
-    setApprovalError("");
+    resetApprovals();
     setBusy(true);
     try {
       setConversation(await getConversation(id));
@@ -383,15 +389,20 @@ export default function Home() {
   }
   async function loadApprovals() {
     if (!conversation) return;
+    const generation = approvalGeneration.current;
+    const conversationId = conversation.id;
     setApprovalBusy(true);
     setApprovalError("");
     try {
-      setApprovals(await listApprovals(conversation.id));
+      const loaded = await listApprovals(conversationId);
+      if (approvalGeneration.current !== generation) return;
+      setApprovals(loaded);
       setApprovalsLoaded(true);
     } catch {
-      setApprovalError("承認依頼を読み込めませんでした。もう一度お試しください。");
+      if (approvalGeneration.current === generation)
+        setApprovalError("承認依頼を読み込めませんでした。もう一度お試しください。");
     } finally {
-      setApprovalBusy(false);
+      if (approvalGeneration.current === generation) setApprovalBusy(false);
     }
   }
   async function toggleApprovals() {
@@ -402,34 +413,41 @@ export default function Home() {
   async function requestHandoff(event: FormEvent) {
     event.preventDefault();
     if (!conversation || !handoffTarget.trim() || !handoffSummary.trim()) return;
+    const generation = approvalGeneration.current;
+    const conversationId = conversation.id;
     setApprovalBusy(true);
     setApprovalError("");
     try {
-      const created = await createInternalHandoffApproval(conversation.id, {
+      const created = await createInternalHandoffApproval(conversationId, {
         target: handoffTarget.trim(),
         input: { summary: handoffSummary.trim() },
         evidence: [],
       });
+      if (approvalGeneration.current !== generation) return;
       setApprovals((current) => [...current, created]);
       setApprovalsLoaded(true);
       setHandoffSummary("");
     } catch {
-      setApprovalError("承認依頼を作成できませんでした。もう一度お試しください。");
+      if (approvalGeneration.current === generation)
+        setApprovalError("承認依頼を作成できませんでした。もう一度お試しください。");
     } finally {
-      setApprovalBusy(false);
+      if (approvalGeneration.current === generation) setApprovalBusy(false);
     }
   }
   async function decide(approvalId: string, decision: "approve" | "reject") {
+    const generation = approvalGeneration.current;
     setApprovalBusy(true);
     setApprovalError("");
     try {
       const decided = await decideApproval(approvalId, decision);
+      if (approvalGeneration.current !== generation) return;
       setApprovals((current) => current.map((approval) =>
         approval.id === decided.id ? decided : approval));
     } catch {
-      setApprovalError("承認結果を保存できませんでした。もう一度お試しください。");
+      if (approvalGeneration.current === generation)
+        setApprovalError("承認結果を保存できませんでした。もう一度お試しください。");
     } finally {
-      setApprovalBusy(false);
+      if (approvalGeneration.current === generation) setApprovalBusy(false);
     }
   }
   async function start() {
@@ -444,10 +462,7 @@ export default function Home() {
       setShowManualInput(false);
       setSuggestionRun(null);
       setSuggestionConnectionError(false);
-      setApprovals([]);
-      setApprovalsOpen(false);
-      setApprovalsLoaded(false);
-      setApprovalError("");
+      resetApprovals();
       setItems((old) => [created, ...old]);
       setConversation(await getConversation(created.id));
     } catch {
@@ -508,6 +523,7 @@ export default function Home() {
     try {
       await logout();
       stopCapture();
+      resetApprovals();
       setUser(null);
       setConversation(null);
       setItems([]);
