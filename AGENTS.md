@@ -132,8 +132,10 @@ planned until their individual Issues are implemented and verified.
   and real-world latency targets remain unverified.
 - Approval and in-app handoff APIs, claim/respond authorization and idempotency,
   ended-conversation summary generation/retry, and ID-only domain traces are merged.
-- Remaining UI integration, screenshot evidence and manual acceptance are tracked
-  separately from backend completion. Do not treat an open Draft PR as shipped.
+- Document selection/source/retry, approval/handoff and history/summary UI flows
+  have running-app screenshot evidence on their Issues. Real Meet plus physical
+  microphone acceptance remains open in Issue #102; do not equate provider smoke
+  tests with a completed real-device acceptance check.
 - See `docs/implementation-status.md` for the dated verification matrix, known
   limitations and the next manual acceptance steps.
 
