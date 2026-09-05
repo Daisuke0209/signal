@@ -1,0 +1,310 @@
+"""Single-process orchestration with durable queue and guarded publication."""
+
+import asyncio
+import json
+import logging
+import uuid
+from collections.abc import Callable
+
+import httpx
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from signal_api.config import get_settings
+from signal_api.database import SessionLocal
+from signal_api.documents import search_document_pages
+from signal_api.models import (
+    Conversation,
+    ConversationMessage,
+    ConversationParticipant,
+    ConversationStatus,
+    Document,
+    DocumentProcessingStatus,
+    SuggestionErrorCode,
+    SuggestionKind,
+    SuggestionRun,
+    SuggestionRunStatus,
+)
+from signal_api.suggestion_agent import (
+    AgentFailure,
+    AgentOutput,
+    AgentPhase,
+    Evidence,
+    SuggestionAgent,
+)
+from signal_api.suggestion_events import events
+from signal_api.suggestions import (
+    SuggestionDraft,
+    complete_suggestion_run,
+    fail_suggestion_run,
+    latest_suggestions,
+    start_suggestion_run,
+)
+
+logger = logging.getLogger("signal.suggestions")
+
+
+def transaction[T](operation: Callable[[Session], T]) -> T:
+    with SessionLocal() as db:
+        result = operation(db)
+        db.commit()
+        return result
+
+
+class SuggestionRuntime:
+    def __init__(self, agent: SuggestionAgent) -> None:
+        self.agent = agent
+        self.tasks: dict[uuid.UUID, tuple[int, asyncio.Task[None]]] = {}
+        self.capacity = asyncio.Semaphore(4)
+
+    async def start(self) -> None:
+        events.loop = asyncio.get_running_loop()
+        events.on_input = self.kick
+
+        # A restart invalidates incomplete provider calls, and resumes queued inputs.
+        def recover(db: Session) -> list[tuple[uuid.UUID, uuid.UUID, int]]:
+            runs = list(
+                db.scalars(
+                    select(SuggestionRun)
+                    .where(
+                        SuggestionRun.status.in_(
+                            [SuggestionRunStatus.RUNNING, SuggestionRunStatus.QUEUED]
+                        )
+                    )
+                    .order_by(SuggestionRun.generation)
+                )
+            )
+            pending = []
+            for run in runs:
+                if run.status is SuggestionRunStatus.RUNNING:
+                    fail_suggestion_run(db, run.id, SuggestionErrorCode.INTERRUPTED)
+                else:
+                    pending.append((run.conversation_id, run.id, run.generation))
+            return pending
+
+        for cid, rid, generation in await asyncio.to_thread(transaction, recover):
+            self.kick(cid, rid, generation)
+
+    def kick(self, cid: uuid.UUID, rid: uuid.UUID, generation: int) -> None:
+        previous = self.tasks.get(cid)
+        if previous:
+            if previous[0] >= generation:
+                return
+            previous[1].cancel()
+        task = asyncio.create_task(self.work(cid, rid))
+        self.tasks[cid] = (generation, task)
+
+        def finished(done: asyncio.Task[None]) -> None:
+            if self.tasks.get(cid, (None, None))[1] is done:
+                self.tasks.pop(cid, None)
+            if not done.cancelled() and done.exception() is not None:
+                logger.error("suggestion_state_persistence_failed")
+
+        task.add_done_callback(finished)
+
+    async def close(self) -> None:
+        events.on_input = None
+        events.loop = None
+        tasks = [value[1] for value in self.tasks.values()]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def publish(self, cid: uuid.UUID) -> None:
+        snapshot = await asyncio.to_thread(
+            transaction, lambda db: latest_suggestions(db, cid).model_dump(mode="json")
+        )
+        events.publish(cid, snapshot)
+
+    def prepare(
+        self, db: Session, cid: uuid.UUID, rid: uuid.UUID
+    ) -> tuple[str, uuid.UUID, bool] | None:
+        conversation = db.scalar(
+            select(Conversation).where(Conversation.id == cid).with_for_update()
+        )
+        if conversation is None:
+            return None
+        runs = list(
+            db.scalars(
+                select(SuggestionRun)
+                .where(SuggestionRun.conversation_id == cid)
+                .order_by(SuggestionRun.generation.desc())
+            )
+        )
+        if not runs or runs[0].id != rid:
+            return None
+        for old in runs[1:]:
+            if old.status in (SuggestionRunStatus.QUEUED, SuggestionRunStatus.RUNNING):
+                fail_suggestion_run(db, old.id, SuggestionErrorCode.INTERRUPTED)
+        run = runs[0]
+        if conversation.status is not ConversationStatus.ACTIVE:
+            if run.status in (SuggestionRunStatus.QUEUED, SuggestionRunStatus.RUNNING):
+                fail_suggestion_run(db, rid, SuggestionErrorCode.INTERRUPTED)
+            return None
+        if run.status is not SuggestionRunStatus.QUEUED:
+            return None
+        start_suggestion_run(db, rid)
+        rows = db.execute(
+            select(ConversationMessage, ConversationParticipant)
+            .join(
+                ConversationParticipant,
+                ConversationParticipant.id == ConversationMessage.participant_id,
+            )
+            .where(
+                ConversationMessage.conversation_id == cid,
+                ConversationMessage.sequence_number <= run.input_sequence_number,
+            )
+            .order_by(ConversationMessage.sequence_number.desc())
+            .limit(12)
+        ).all()
+        available = bool(
+            db.scalar(
+                select(func.count(Document.id)).where(
+                    Document.organization_id == conversation.organization_id,
+                    Document.processing_status == DocumentProcessingStatus.READY,
+                )
+            )
+        )
+        context = json.dumps(
+            {
+                "documents": "available" if available else "no_searchable_documents",
+                "conversation": [
+                    {"side": participant.side.value, "text": message.content[:1500]}
+                    for message, participant in reversed(rows)
+                ],
+            },
+            ensure_ascii=False,
+        )
+        return context, conversation.organization_id, available
+
+    def phase(
+        self, db: Session, cid: uuid.UUID, rid: uuid.UUID, phase: AgentPhase
+    ) -> None:
+        run = db.scalar(
+            select(SuggestionRun).where(SuggestionRun.id == rid).with_for_update()
+        )
+        if (
+            run
+            and run.status is SuggestionRunStatus.RUNNING
+            and run.phase != phase.value
+        ):
+            run.phase = phase.value
+            run.revision += 1
+
+    def finish(
+        self,
+        db: Session,
+        cid: uuid.UUID,
+        rid: uuid.UUID,
+        output: AgentOutput,
+        evidence: dict[str, Evidence],
+    ) -> None:
+        conversation = db.scalar(
+            select(Conversation).where(Conversation.id == cid).with_for_update()
+        )
+        run = db.get(SuggestionRun, rid)
+        if (
+            conversation is None
+            or run is None
+            or run.status is not SuggestionRunStatus.RUNNING
+        ):
+            return
+        latest = db.scalar(
+            select(func.max(ConversationMessage.sequence_number)).where(
+                ConversationMessage.conversation_id == cid
+            )
+        )
+        generation = db.scalar(
+            select(func.max(SuggestionRun.generation)).where(
+                SuggestionRun.conversation_id == cid
+            )
+        )
+        if (
+            conversation.status is not ConversationStatus.ACTIVE
+            or latest != run.input_sequence_number
+            or generation != run.generation
+        ):
+            fail_suggestion_run(db, rid, SuggestionErrorCode.INTERRUPTED)
+            return
+        complete_suggestion_run(
+            db,
+            rid,
+            [
+                SuggestionDraft(
+                    kind=SuggestionKind(item.kind),
+                    content=item.content,
+                    sources=[evidence[key] for key in dict.fromkeys(item.evidence_ids)],
+                )
+                for item in output.suggestions
+            ],
+        )
+
+    async def fail(self, cid: uuid.UUID, rid: uuid.UUID, code: str) -> None:
+        def mark(db: Session) -> None:
+            run = db.scalar(
+                select(SuggestionRun).where(SuggestionRun.id == rid).with_for_update()
+            )
+            if run and run.status in (
+                SuggestionRunStatus.QUEUED,
+                SuggestionRunStatus.RUNNING,
+            ):
+                fail_suggestion_run(db, rid, SuggestionErrorCode(code))
+
+        await asyncio.to_thread(transaction, mark)
+        await self.publish(cid)
+
+    async def work(self, cid: uuid.UUID, rid: uuid.UUID) -> None:
+        try:
+            await self.publish(cid)
+            async with self.capacity:
+                prepared = await asyncio.to_thread(
+                    transaction, lambda db: self.prepare(db, cid, rid)
+                )
+                await self.publish(cid)
+                if prepared is None:
+                    return
+                context, org_id, available = prepared
+
+                async def report(phase: AgentPhase) -> None:
+                    await asyncio.to_thread(
+                        transaction, lambda db: self.phase(db, cid, rid, phase)
+                    )
+                    await self.publish(cid)
+
+                async def search(query: str) -> list[Evidence]:
+                    def lookup(db: Session) -> list[Evidence]:
+                        return [
+                            Evidence.model_validate(item.model_dump(exclude={"score"}))
+                            for item in search_document_pages(
+                                db, org_id, query, limit=5
+                            )
+                        ]
+
+                    return await asyncio.to_thread(transaction, lookup)
+
+                output, evidence = await self.agent.generate(
+                    context, search if available else None, report
+                )
+                await asyncio.to_thread(
+                    transaction, lambda db: self.finish(db, cid, rid, output, evidence)
+                )
+                await self.publish(cid)
+        except asyncio.CancelledError:
+            await self.fail(cid, rid, "interrupted")
+            raise
+        except AgentFailure as error:
+            await self.fail(cid, rid, error.code)
+        except Exception:
+            # No traceback/provider body/conversation/PDF content in logs.
+            logger.error("suggestion_generation_failed", extra={"run_id": str(rid)})
+            await self.fail(cid, rid, "generation_failed")
+
+
+def create_agent(client: httpx.AsyncClient) -> SuggestionAgent:
+    settings = get_settings()
+    return SuggestionAgent(
+        client,
+        settings.openai_api_key.get_secret_value() if settings.openai_api_key else "",
+        settings.suggestion_model,
+        settings.suggestion_timeout_seconds,
+    )

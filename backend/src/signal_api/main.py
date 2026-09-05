@@ -1,5 +1,8 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated
 
+import httpx
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -15,18 +18,39 @@ from signal_api.observability import (
     RequestLoggingMiddleware,
     configure_request_logging,
 )
+from signal_api.suggestion_runtime import SuggestionRuntime, create_agent
+from signal_api.suggestion_stream import router as suggestion_stream_router
 from signal_api.suggestions import router as suggestions_router
 from signal_api.transcription_routes import router as transcription_router
 
 settings = get_settings()
 
 configure_request_logging()
-app = FastAPI(title="Signal API")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    if not get_settings().suggestions_enabled:
+        yield
+        return
+    async with httpx.AsyncClient(
+        timeout=get_settings().suggestion_timeout_seconds
+    ) as client:
+        runtime = SuggestionRuntime(create_agent(client))
+        await runtime.start()
+        try:
+            yield
+        finally:
+            await runtime.close()
+
+
+app = FastAPI(title="Signal API", lifespan=lifespan)
 app.add_middleware(RequestLoggingMiddleware)
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(documents_router)
 app.include_router(suggestions_router)
+app.include_router(suggestion_stream_router)
 app.include_router(transcription_router)
 
 app.add_middleware(

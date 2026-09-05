@@ -5,6 +5,7 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from signal_api.config import get_settings
 from signal_api.conversations import ConversationMessageResponse
 from signal_api.database import SessionLocal
 from signal_api.models import (
@@ -17,6 +18,8 @@ from signal_api.models import (
     TranscriptionSession,
 )
 from signal_api.session_store import get_valid_session
+from signal_api.suggestion_events import events
+from signal_api.suggestions import queue_suggestion_run
 from signal_api.transcription import Source, TranscriptionFailure, TranscriptUpdate
 
 
@@ -136,7 +139,14 @@ def persist_final(
                     session_id=session_id, item_id=update.item_id, message_id=message.id
                 )
             )
+            run = (
+                queue_suggestion_run(db, session.conversation_id)
+                if get_settings().suggestions_enabled
+                else None
+            )
             db.commit()
+            if run:
+                events.queued(session.conversation_id, run.id, run.generation)
         participant = db.get(ConversationParticipant, message.participant_id)
         assert participant is not None
         return ConversationMessageResponse(
