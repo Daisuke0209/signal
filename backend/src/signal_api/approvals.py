@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from signal_api.auth import CurrentUser
 from signal_api.database import get_db_session
+from signal_api.domain_traces import span, trace, trace_context
 from signal_api.models import (
     ApprovalRequest,
     ApprovalRequestStatus,
@@ -81,16 +82,19 @@ def create_approval(
     db: DatabaseSession,
     current_user: CurrentUser,
 ) -> ApprovalResponse:
-    authorized_conversation(db, conversation_id, current_user.id)
-    item = ApprovalRequest(
-        conversation_id=conversation_id,
-        requested_by_user_id=current_user.id,
-        **request.model_dump(mode="json"),
-    )
-    db.add(item)
-    db.commit()
-    db.refresh(item)
-    return response(item)
+    with trace_context(conversation_id), span("approval.create"):
+        authorized_conversation(db, conversation_id, current_user.id)
+        item = ApprovalRequest(
+            conversation_id=conversation_id,
+            requested_by_user_id=current_user.id,
+            **request.model_dump(mode="json"),
+        )
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+        with trace_context(conversation_id, operation_id=item.id):
+            trace("approval.created")
+        return response(item)
 
 
 @router.get("/{conversation_id}/approvals", response_model=list[ApprovalResponse])
@@ -114,28 +118,33 @@ def decide(
     db: Session,
     user_id: uuid.UUID,
 ) -> ApprovalRequest:
-    item = db.scalar(
-        select(ApprovalRequest)
-        .where(ApprovalRequest.id == approval_id)
-        .with_for_update()
-    )
-    if item is None:
-        raise HTTPException(404, "Approval request not found")
-    authorized_conversation(db, item.conversation_id, user_id)
-    if item.status is not ApprovalRequestStatus.PENDING:
-        if item.status is desired:
-            return item
-        raise HTTPException(
-            status_code=409, detail="Approval request is already decided"
+    with trace_context(operation_id=approval_id), span("approval.decide"):
+        item = db.scalar(
+            select(ApprovalRequest)
+            .where(ApprovalRequest.id == approval_id)
+            .with_for_update()
         )
-    item.status = desired
-    item.decided_by_user_id = user_id
-    item.decided_at = datetime.now(UTC)
-    if desired is ApprovalRequestStatus.APPROVED:
-        db.add(InternalHandoff(approval_request_id=item.id))
-    db.commit()
-    db.refresh(item)
-    return item
+        if item is None:
+            raise HTTPException(404, "Approval request not found")
+        authorized_conversation(db, item.conversation_id, user_id)
+        if item.status is not ApprovalRequestStatus.PENDING:
+            if item.status is desired:
+                with trace_context(item.conversation_id, operation_id=item.id):
+                    trace("approval.decision_replayed")
+                return item
+            raise HTTPException(
+                status_code=409, detail="Approval request is already decided"
+            )
+        item.status = desired
+        item.decided_by_user_id = user_id
+        item.decided_at = datetime.now(UTC)
+        if desired is ApprovalRequestStatus.APPROVED:
+            db.add(InternalHandoff(approval_request_id=item.id))
+        db.commit()
+        db.refresh(item)
+        with trace_context(item.conversation_id, operation_id=item.id):
+            trace("approval." + desired.value)
+        return item
 
 
 @router.post("/approvals/{approval_id}/approve", response_model=ApprovalResponse)

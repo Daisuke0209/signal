@@ -52,14 +52,21 @@ def configure_domain_logging() -> None:
 
 @contextmanager
 def trace_context(
-    conversation_id: uuid.UUID,
+    conversation_id: uuid.UUID | None = None,
     *,
     run_id: uuid.UUID | None = None,
     generation: int | None = None,
     session_id: uuid.UUID | None = None,
+    operation_id: uuid.UUID | None = None,
 ) -> Iterator[None]:
-    values: dict[str, str | int] = {"conversation_id": str(conversation_id)}
-    for key, value in (("run_id", run_id), ("session_id", session_id)):
+    values: dict[str, str | int] = {}
+    if conversation_id is not None:
+        values["conversation_id"] = str(conversation_id)
+    for key, value in (
+        ("run_id", run_id),
+        ("session_id", session_id),
+        ("operation_id", operation_id),
+    ):
         if value is not None:
             values[key] = str(value)
     if generation is not None:
