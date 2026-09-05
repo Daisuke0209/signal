@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -33,6 +34,13 @@ class ConversationResponse(BaseModel):
     status: ConversationStatus
 
 
+class ConversationListItemResponse(BaseModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    status: ConversationStatus
+    created_at: datetime
+
+
 class CreateConversationMessageRequest(BaseModel):
     speaker_label: str = Field(max_length=100)
     side: ConversationParticipantSide
@@ -55,6 +63,32 @@ class ConversationMessageResponse(BaseModel):
     side: ConversationParticipantSide
     sequence_number: int
     content: str
+
+
+class ConversationParticipantResponse(BaseModel):
+    id: uuid.UUID
+    side: ConversationParticipantSide
+    speaker_label: str
+    display_name: str | None
+
+
+class ConversationDetailMessageResponse(BaseModel):
+    id: uuid.UUID
+    participant_id: uuid.UUID
+    speaker_label: str
+    side: ConversationParticipantSide
+    sequence_number: int
+    content: str
+
+
+class ConversationDetailResponse(BaseModel):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    created_by_user_id: uuid.UUID
+    status: ConversationStatus
+    created_at: datetime
+    participants: list[ConversationParticipantResponse]
+    messages: list[ConversationDetailMessageResponse]
 
 
 @router.post(
@@ -92,6 +126,102 @@ def create_conversation(
         organization_id=conversation.organization_id,
         created_by_user_id=conversation.created_by_user_id,
         status=conversation.status,
+    )
+
+
+@router.get("", response_model=list[ConversationListItemResponse])
+def list_conversations(
+    db: DatabaseSession,
+    current_user: CurrentUser,
+) -> list[ConversationListItemResponse]:
+    conversations = db.scalars(
+        select(Conversation)
+        .join(
+            Membership,
+            Membership.organization_id == Conversation.organization_id,
+        )
+        .where(Membership.user_id == current_user.id)
+        .order_by(Conversation.created_at.desc(), Conversation.id.desc())
+    ).all()
+
+    return [
+        ConversationListItemResponse(
+            id=conversation.id,
+            organization_id=conversation.organization_id,
+            status=conversation.status,
+            created_at=conversation.created_at,
+        )
+        for conversation in conversations
+    ]
+
+
+@router.get("/{conversation_id}", response_model=ConversationDetailResponse)
+def get_conversation(
+    conversation_id: uuid.UUID,
+    db: DatabaseSession,
+    current_user: CurrentUser,
+) -> ConversationDetailResponse:
+    conversation = db.get(Conversation, conversation_id)
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found",
+        )
+
+    membership = db.get(
+        Membership,
+        {
+            "organization_id": conversation.organization_id,
+            "user_id": current_user.id,
+        },
+    )
+    if membership is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not a member of this organization",
+        )
+
+    participants = db.scalars(
+        select(ConversationParticipant)
+        .where(ConversationParticipant.conversation_id == conversation.id)
+        .order_by(ConversationParticipant.created_at, ConversationParticipant.id)
+    ).all()
+    message_rows = db.execute(
+        select(ConversationMessage, ConversationParticipant)
+        .join(
+            ConversationParticipant,
+            ConversationParticipant.id == ConversationMessage.participant_id,
+        )
+        .where(ConversationMessage.conversation_id == conversation.id)
+        .order_by(ConversationMessage.sequence_number)
+    ).all()
+
+    return ConversationDetailResponse(
+        id=conversation.id,
+        organization_id=conversation.organization_id,
+        created_by_user_id=conversation.created_by_user_id,
+        status=conversation.status,
+        created_at=conversation.created_at,
+        participants=[
+            ConversationParticipantResponse(
+                id=participant.id,
+                side=participant.side,
+                speaker_label=participant.speaker_label,
+                display_name=participant.display_name,
+            )
+            for participant in participants
+        ],
+        messages=[
+            ConversationDetailMessageResponse(
+                id=message.id,
+                participant_id=message.participant_id,
+                speaker_label=participant.speaker_label,
+                side=participant.side,
+                sequence_number=message.sequence_number,
+                content=message.content,
+            )
+            for message, participant in message_rows
+        ],
     )
 
 

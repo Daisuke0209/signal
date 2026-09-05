@@ -195,6 +195,163 @@ def test_create_conversation_rejects_invalid_organization_id_without_saving(
     assert conversation_count == 0
 
 
+def test_list_conversations_returns_only_member_organizations(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, user_id, email = conversation_user
+    other_organization_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        other_organization = Organization(
+            id=other_organization_id,
+            name="Conversation List Other Organization",
+            slug=f"conversation-list-other-{uuid.uuid4()}",
+        )
+        db.add(other_organization)
+        db.flush()
+        db.add(
+            Conversation(
+                organization_id=other_organization_id,
+                created_by_user_id=user_id,
+            )
+        )
+        db.commit()
+
+    try:
+        with TestClient(app) as client:
+            login(client, email)
+            expected_conversation_id = create_conversation(client, organization_id)
+            response = client.get("/conversations")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert len(body) == 1
+        assert body[0]["id"] == str(expected_conversation_id)
+        assert body[0]["organization_id"] == str(organization_id)
+        assert body[0]["status"] == "active"
+        assert body[0]["created_at"]
+    finally:
+        with SessionLocal() as db:
+            db.execute(
+                delete(Organization).where(Organization.id == other_organization_id)
+            )
+            db.commit()
+
+
+def test_get_conversation_returns_participants_and_messages_in_sequence_order(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, user_id, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        conversation_id = create_conversation(client, organization_id)
+        customer_response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(
+                speaker_label="customer_1",
+                content="手作業が多く、対応が遅れています。",
+            ),
+        )
+        sales_rep_response = client.post(
+            f"/conversations/{conversation_id}/messages",
+            json=message_request(
+                speaker_label="sales_rep_1",
+                side="sales_rep",
+                content="特に時間がかかる業務を教えてください。",
+            ),
+        )
+        detail_response = client.get(f"/conversations/{conversation_id}")
+
+    assert customer_response.status_code == 201
+    assert sales_rep_response.status_code == 201
+    assert detail_response.status_code == 200
+    body = detail_response.json()
+    assert body["id"] == str(conversation_id)
+    assert body["organization_id"] == str(organization_id)
+    assert body["created_by_user_id"] == str(user_id)
+    assert body["created_at"]
+    participants = {
+        (participant["speaker_label"], participant["side"])
+        for participant in body["participants"]
+    }
+    assert participants == {
+        ("customer_1", "customer"),
+        ("sales_rep_1", "sales_rep"),
+    }
+    assert [message["sequence_number"] for message in body["messages"]] == [1, 2]
+    assert [message["speaker_label"] for message in body["messages"]] == [
+        "customer_1",
+        "sales_rep_1",
+    ]
+    assert [message["content"] for message in body["messages"]] == [
+        "手作業が多く、対応が遅れています。",
+        "特に時間がかかる業務を教えてください。",
+    ]
+
+
+def test_get_conversation_requires_authentication() -> None:
+    with TestClient(app) as client:
+        list_response = client.get("/conversations")
+        detail_response = client.get(f"/conversations/{uuid.uuid4()}")
+
+    assert list_response.status_code == 401
+    assert detail_response.status_code == 401
+    assert list_response.json() == {"detail": "Authentication required"}
+    assert detail_response.json() == {"detail": "Authentication required"}
+
+
+def test_get_conversation_rejects_non_member(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    _, user_id, email = conversation_user
+    other_organization_id = uuid.uuid4()
+
+    with SessionLocal() as db:
+        db.add(
+            Organization(
+                id=other_organization_id,
+                name="Conversation Detail Other Organization",
+                slug=f"conversation-detail-other-{uuid.uuid4()}",
+            )
+        )
+        db.flush()
+        conversation = Conversation(
+            organization_id=other_organization_id,
+            created_by_user_id=user_id,
+        )
+        db.add(conversation)
+        db.commit()
+        conversation_id = conversation.id
+
+    try:
+        with TestClient(app) as client:
+            login(client, email)
+            response = client.get(f"/conversations/{conversation_id}")
+
+        assert response.status_code == 403
+        assert response.json() == {"detail": "Not a member of this organization"}
+    finally:
+        with SessionLocal() as db:
+            db.execute(
+                delete(Organization).where(Organization.id == other_organization_id)
+            )
+            db.commit()
+
+
+def test_get_conversation_returns_not_found_for_unknown_conversation(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    _, _, email = conversation_user
+
+    with TestClient(app) as client:
+        login(client, email)
+        response = client.get(f"/conversations/{uuid.uuid4()}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Conversation not found"}
+
+
 def test_add_messages_reuses_speaker_and_assigns_sequence_numbers(
     conversation_user: tuple[uuid.UUID, uuid.UUID, str],
 ) -> None:
