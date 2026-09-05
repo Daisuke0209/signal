@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime, timedelta
 from threading import Barrier
 
 import pytest
@@ -200,6 +201,7 @@ def test_list_conversations_returns_only_member_organizations(
 ) -> None:
     organization_id, user_id, email = conversation_user
     other_organization_id = uuid.uuid4()
+    created_at = datetime.now(UTC)
 
     with SessionLocal() as db:
         other_organization = Organization(
@@ -215,21 +217,38 @@ def test_list_conversations_returns_only_member_organizations(
                 created_by_user_id=user_id,
             )
         )
+        oldest_conversation = Conversation(
+            organization_id=organization_id,
+            created_by_user_id=user_id,
+            created_at=created_at - timedelta(minutes=1),
+        )
+        newest_conversation = Conversation(
+            organization_id=organization_id,
+            created_by_user_id=user_id,
+            created_at=created_at,
+        )
+        db.add_all([oldest_conversation, newest_conversation])
         db.commit()
+        oldest_conversation_id = oldest_conversation.id
+        newest_conversation_id = newest_conversation.id
 
     try:
         with TestClient(app) as client:
             login(client, email)
-            expected_conversation_id = create_conversation(client, organization_id)
             response = client.get("/conversations")
 
         assert response.status_code == 200
         body = response.json()
-        assert len(body) == 1
-        assert body[0]["id"] == str(expected_conversation_id)
-        assert body[0]["organization_id"] == str(organization_id)
-        assert body[0]["status"] == "active"
-        assert body[0]["created_at"]
+        assert [conversation["id"] for conversation in body] == [
+            str(newest_conversation_id),
+            str(oldest_conversation_id),
+        ]
+        assert all(
+            conversation["organization_id"] == str(organization_id)
+            for conversation in body
+        )
+        assert all(conversation["status"] == "active" for conversation in body)
+        assert all(conversation["created_at"] for conversation in body)
     finally:
         with SessionLocal() as db:
             db.execute(
