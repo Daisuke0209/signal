@@ -1,5 +1,6 @@
 "use client";
 
+import { observePaint, receivedAt } from "@/lib/browser-observations";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -113,6 +114,8 @@ export default function Home() {
   const captureGeneration = useRef(0);
   const live = useRef<LiveTranscription | null>(null);
   const liveAbort = useRef<AbortController | null>(null);
+  const observedPartialSessions = useRef(new Set<string>());
+  const latestTranscript = useRef<TranscriptEvent | null>(null);
   const [partials, setPartials] = useState<Record<string, TranscriptEvent>>({});
   const [isStopping, setIsStopping] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
@@ -128,6 +131,8 @@ export default function Home() {
     liveAbort.current?.abort();
     live.current?.abort();
     live.current = null;
+    latestTranscript.current = null;
+    observedPartialSessions.current.clear();
     setPartials({});
     setIsStopping(false);
     stopStream(capture.current?.displayStream ?? null);
@@ -169,6 +174,7 @@ export default function Home() {
       const connection = await startLiveTranscription(nextCapture, conversation.id, aborter.signal,
         (update) => {
           if (captureGeneration.current !== generation) return;
+          latestTranscript.current = update;
           const key = `${update.source}:${update.item_id}`;
           setPartials((old) => {
             const next = { ...old };
@@ -230,6 +236,27 @@ export default function Home() {
   }
   useEffect(() => () => stopCapture(), []);
   const conversationId = conversation?.id;
+  useEffect(() => {
+    if (!conversationId || !suggestionRun || suggestionRun.status !== "succeeded") return;
+    const timestamp = receivedAt(suggestionRun);
+    if (timestamp === undefined) return; // Restored GET state is not live latency.
+    return observePaint(conversationId, {
+      kind: "suggestion", run_id: suggestionRun.id, revision: suggestionRun.revision,
+    }, timestamp);
+  }, [conversationId, suggestionRun]);
+  useEffect(() => {
+    const update = latestTranscript.current;
+    if (!conversationId || !update?.session_id) return;
+    const timestamp = receivedAt(update);
+    if (timestamp === undefined) return;
+    if (update.type === "partial" && observedPartialSessions.current.has(update.session_id)) return;
+    if (update.type === "partial") observedPartialSessions.current.add(update.session_id);
+    return observePaint(conversationId, {
+      kind: update.type === "final" ? "transcript_final" : "transcript_partial",
+      session_id: update.session_id,
+    }, timestamp);
+  }, [conversationId, partials]);
+
   useEffect(() => {
     if (!user || !conversationId) return;
 

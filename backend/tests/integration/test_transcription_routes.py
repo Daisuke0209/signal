@@ -1,4 +1,6 @@
 import asyncio
+import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -10,6 +12,7 @@ from starlette.websockets import WebSocketDisconnect
 from test_conversations import conversation_user as conversation_user
 from test_conversations import create_conversation, login
 
+from signal_api import domain_traces
 from signal_api.database import SessionLocal
 from signal_api.main import app
 from signal_api.models import Membership, TranscriptionSession
@@ -76,8 +79,14 @@ def ws_path(conversation_id: uuid.UUID, source: str = "display") -> str:
 
 
 def test_partial_final_persistence_dedup_and_cleanup(
-    conversation_user: tuple[uuid.UUID, uuid.UUID, str], providers: list[FakeProvider]
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+    providers: list[FakeProvider],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
+    log = logging.getLogger("signal_test.transcription")
+    monkeypatch.setattr(domain_traces, "logger", log)
+    caplog.set_level(logging.INFO, logger=log.name)
     org, _, email = conversation_user
     with TestClient(app) as client:
         login(client, email)
@@ -105,6 +114,23 @@ def test_partial_final_persistence_dedup_and_cleanup(
             ws.send_text('{"type":"stop"}')
             assert ws.receive_json() == {"type": "stopped"}
         assert len(client.get(f"/conversations/{cid}").json()["messages"]) == 1
+    records = [
+        json.loads(record.message)
+        for record in caplog.records
+        if record.name == log.name
+    ]
+    assert {r["event"] for r in records} >= {
+        "transcription.first_audio",
+        "transcription.first_partial_latency",
+        "transcription.persist_final",
+        "transcription.ws_send",
+    }
+    assert all(
+        r["conversation_id"] == str(cid) and r["session_id"] == ready["session_id"]
+        for r in records
+    )
+    assert "確定した発言" not in caplog.text
+    assert "途中の" not in caplog.text
     assert providers[0].closed
     with SessionLocal() as db:
         session = db.get(TranscriptionSession, uuid.UUID(ready["session_id"]))

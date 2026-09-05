@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 
 from signal_api.auth import SessionCookie
 from signal_api.database import SessionLocal
+from signal_api.domain_traces import trace, trace_context
 from signal_api.models import Conversation, Membership
 from signal_api.session_store import get_valid_session
 from signal_api.suggestion_events import events
@@ -60,7 +61,14 @@ async def stream_suggestions(
     async def stream() -> AsyncIterator[str]:
         deadline = time.monotonic() + 3600
         try:
-            yield "event: suggestion_state\ndata: " + initial.model_dump_json() + "\n\n"
+            yield (
+                "event: suggestion_state\ndata: "
+                + json.dumps(
+                    {**initial.model_dump(mode="json"), "delivery": "snapshot"},
+                    ensure_ascii=False,
+                )
+                + "\n\n"
+            )
             while time.monotonic() < deadline:
                 payload = None
                 with suppress(TimeoutError):
@@ -77,9 +85,19 @@ async def stream_suggestions(
                 if payload is None:
                     yield ": keepalive\n\n"
                 else:
+                    run = payload.get("latest_run")
+                    if run:
+                        with trace_context(
+                            conversation_id,
+                            run_id=uuid.UUID(run["id"]),
+                            generation=run["generation"],
+                        ):
+                            trace("suggestion.sse_send", revision=run["revision"])
                     yield (
                         "event: suggestion_state\ndata: "
-                        + json.dumps(payload, ensure_ascii=False)
+                        + json.dumps(
+                            {**payload, "delivery": "live"}, ensure_ascii=False
+                        )
                         + "\n\n"
                     )
         finally:
