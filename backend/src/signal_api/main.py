@@ -16,6 +16,7 @@ from signal_api.observability import (
     configure_request_logging,
 )
 from signal_api.suggestions import router as suggestions_router
+from signal_api.transcription_routes import router as transcription_router
 
 settings = get_settings()
 
@@ -26,6 +27,7 @@ app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(documents_router)
 app.include_router(suggestions_router)
+app.include_router(transcription_router)
 
 app.add_middleware(
     CORSMiddleware,

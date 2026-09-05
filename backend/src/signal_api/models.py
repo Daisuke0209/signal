@@ -301,6 +301,42 @@ class ConversationMessage(Base):
     )
 
 
+class TranscriptionSession(Base):
+    __tablename__ = "transcription_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'active'")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class TranscriptionItem(Base):
+    __tablename__ = "transcription_items"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("transcription_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    item_id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_messages.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+
 class DocumentProcessingStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
@@ -379,6 +415,15 @@ class SuggestionErrorCode(StrEnum):
 class SuggestionRun(Base):
     __tablename__ = "suggestion_runs"
     __table_args__ = (
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed')",
+            name="suggestion_run_status",
+        ),
+        CheckConstraint(
+            "error_code IN ('provider_unavailable', 'timeout', "
+            "'generation_failed', 'interrupted')",
+            name="suggestion_error_code",
+        ),
         UniqueConstraint(
             "conversation_id", "generation", name="suggestion_runs_generation_unique"
         ),
@@ -417,7 +462,7 @@ class SuggestionRun(Base):
             values_callable=lambda members: [m.value for m in members],
             name="suggestion_run_status",
             native_enum=False,
-            create_constraint=True,
+            create_constraint=False,
         ),
         nullable=False,
         server_default="queued",
@@ -428,7 +473,7 @@ class SuggestionRun(Base):
             values_callable=lambda members: [m.value for m in members],
             name="suggestion_error_code",
             native_enum=False,
-            create_constraint=True,
+            create_constraint=False,
         ),
         nullable=True,
     )
@@ -446,6 +491,10 @@ class SuggestionRun(Base):
 class Suggestion(Base):
     __tablename__ = "suggestions"
     __table_args__ = (
+        CheckConstraint(
+            "kind IN ('question', 'response', 'confirmation')",
+            name="suggestion_kind",
+        ),
         UniqueConstraint("run_id", "position", name="suggestions_run_position_unique"),
         CheckConstraint("position >= 0", name="suggestions_position_nonnegative"),
         CheckConstraint(
@@ -468,9 +517,30 @@ class Suggestion(Base):
             values_callable=lambda members: [m.value for m in members],
             name="suggestion_kind",
             native_enum=False,
-            create_constraint=True,
+            create_constraint=False,
         ),
         nullable=False,
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class DocumentPage(Base):
+    __tablename__ = "document_pages"
+    __table_args__ = (
+        UniqueConstraint(
+            "document_id",
+            "page_number",
+            name="document_pages_document_id_page_number_unique",
+        ),
+    )
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    page_number: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)

@@ -1,11 +1,13 @@
 import uuid
 from datetime import datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from pypdf import PdfReader
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from signal_api.auth import CurrentUser
@@ -13,6 +15,7 @@ from signal_api.config import get_settings
 from signal_api.database import get_db_session
 from signal_api.models import (
     Document,
+    DocumentPage,
     DocumentProcessingStatus,
     Membership,
     Organization,
@@ -135,3 +138,57 @@ async def create_document(
         created_at=document.created_at,
         uploaded_by_name=current_user.name,
     )
+
+
+@router.post("/{document_id}/extract", response_model=DocumentResponse)
+def extract_document(
+    document_id: uuid.UUID, db: DatabaseSession, current_user: CurrentUser
+) -> DocumentResponse:
+    document = db.scalar(
+        select(Document).where(Document.id == document_id).with_for_update()
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    require_membership(document.organization_id, current_user.id, db)
+    try:
+        reader = PdfReader(
+            BytesIO(
+                (
+                    get_settings().document_storage_dir / document.storage_key
+                ).read_bytes()
+            )
+        )
+        if reader.is_encrypted:
+            raise ValueError("Encrypted PDF")
+        if len(reader.pages) > get_settings().document_max_pages:
+            raise ValueError("PDF exceeds page limit")
+        pages = [
+            (index + 1, page.extract_text() or "")
+            for index, page in enumerate(reader.pages)
+        ]
+        if (
+            sum(len(text.encode()) for _, text in pages)
+            > get_settings().document_max_extracted_text_bytes
+        ):
+            raise ValueError("PDF text exceeds limit")
+    except Exception:
+        db.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
+        document.processing_status = DocumentProcessingStatus.FAILED
+        document.processing_error = "PDF extraction failed"
+        db.commit()
+        return to_document_response(document, db)
+    db.execute(delete(DocumentPage).where(DocumentPage.document_id == document.id))
+    if not any(text.strip() for _, text in pages):
+        document.processing_status = DocumentProcessingStatus.TEXT_UNAVAILABLE
+        document.processing_error = "No extractable text"
+    else:
+        db.add_all(
+            [
+                DocumentPage(document_id=document.id, page_number=n, content=text)
+                for n, text in pages
+            ]
+        )
+        document.processing_status = DocumentProcessingStatus.READY
+        document.processing_error = None
+    db.commit()
+    return to_document_response(document, db)
