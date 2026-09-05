@@ -1153,3 +1153,137 @@ it("discards delayed approval decisions after switching conversations", async ()
   resolveDecision?.(jsonResponse({ ...pending, status: "approved", decided_by_user_id: currentUser.id, decided_at: first.created_at }));
   await waitFor(() => expect(screen.queryByText("古い決定")).toBeNull());
 });
+
+describe("handoff inbox", () => {
+  const detail = { id: "conversation-handoff", organization_id: "org-1", created_by_user_id: currentUser.id, status: "active", created_at: "2026-09-05T12:00:00Z", participants: [], messages: [] };
+  const user = { ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] };
+  const openHandoff = { approval_request_id: "handoff-1", conversation_id: detail.id, target: "営業支援", summary: "技術要件を確認する", evidence: [], requested_by_user_id: currentUser.id, created_at: detail.created_at, status: "open", assignee_user_id: null, claimed_at: null, response_content: null, responded_by_user_id: null, responded_at: null, resolved_at: null };
+  function initial(fetchMock: ReturnType<typeof vi.fn>) {
+    fetchMock.mockResolvedValueOnce(jsonResponse(user)).mockResolvedValueOnce(jsonResponse([{ id: detail.id, organization_id: detail.organization_id, status: detail.status, created_at: detail.created_at }])).mockResolvedValueOnce(jsonResponse(detail));
+  }
+  it("claims a handoff, saves its answer, and keeps retry visible after a failure", async () => {
+    const fetchMock = vi.fn(); initial(fetchMock);
+    fetchMock.mockResolvedValueOnce(jsonResponse([openHandoff]))
+      .mockResolvedValueOnce(jsonResponse({ ...openHandoff, status: "claimed", assignee_user_id: currentUser.id, claimed_at: detail.created_at }))
+      .mockResolvedValueOnce(new Response(null, { status: 500 }))
+      .mockResolvedValueOnce(jsonResponse({ ...openHandoff, status: "resolved", assignee_user_id: currentUser.id, claimed_at: detail.created_at, response_content: "担当が回答します。", responded_by_user_id: currentUser.id, responded_at: detail.created_at, resolved_at: detail.created_at }));
+    vi.stubGlobal("fetch", fetchMock); render(<Home />);
+    await screen.findByText("進行中の商談");
+    fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+    expect(await screen.findByText("技術要件を確認する")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "回答して解決" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "受け取る" }));
+    await screen.findByRole("button", { name: "回答して解決" });
+    fireEvent.change(screen.getByLabelText("回答 営業支援"), { target: { value: "担当が回答します。" } });
+    fireEvent.click(screen.getByRole("button", { name: "回答して解決" }));
+    expect(await screen.findByText("回答を保存できませんでした。もう一度お試しください。")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "回答して解決" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "回答して解決" })).toBeNull());
+  });
+
+  it("does not offer response controls for a handoff claimed by another member", async () => {
+    const claimedByAnotherMember = {
+      ...openHandoff,
+      status: "claimed",
+      assignee_user_id: "another-member",
+      claimed_at: detail.created_at,
+    };
+    const fetchMock = vi.fn();
+    initial(fetchMock);
+    fetchMock.mockResolvedValueOnce(jsonResponse([claimedByAnotherMember]));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Home />);
+
+    await screen.findByText("進行中の商談");
+    fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+
+    expect(await screen.findByText("別の担当者が対応中です。")).toBeDefined();
+    expect(screen.queryByLabelText("回答 営業支援")).toBeNull();
+    expect(screen.queryByRole("button", { name: "回答して解決" })).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+  });
+
+  it("discards a delayed inbox result after a conversation switch", async () => {
+    let resolveInbox: ((response: Response) => void) | undefined;
+    const other = { ...detail, id: "conversation-other" };
+    const fetchMock = vi.fn();
+    fetchMock.mockResolvedValueOnce(jsonResponse(user)).mockResolvedValueOnce(jsonResponse([{ id: detail.id, organization_id: detail.organization_id, status: detail.status, created_at: detail.created_at }, { id: other.id, organization_id: other.organization_id, status: other.status, created_at: other.created_at }])).mockResolvedValueOnce(jsonResponse(detail)).mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveInbox = resolve; })).mockResolvedValueOnce(jsonResponse(other));
+    vi.stubGlobal("fetch", fetchMock); render(<Home />);
+    await screen.findByText("進行中の商談");
+    fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+    fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+    await screen.findByText("進行中の商談");
+    resolveInbox?.(jsonResponse([openHandoff]));
+    await waitFor(() => expect(screen.queryByText("技術要件を確認する")).toBeNull());
+  });
+});
+
+it("discards delayed handoff claim and response results after switching conversations", async () => {
+  let resolveClaim: ((response: Response) => void) | undefined;
+  let resolveResponse: ((response: Response) => void) | undefined;
+  const first = { id: "handoff-switch-1", organization_id: "org-1", status: "active", created_at: "2026-09-05T12:00:00Z" };
+  const second = { ...first, id: "handoff-switch-2" };
+  const detail = (conversation: typeof first) => ({ ...conversation, created_by_user_id: currentUser.id, participants: [], messages: [] });
+  const handoff = { approval_request_id: "handoff-switch", conversation_id: first.id, target: "営業支援", summary: "古い引継ぎ", evidence: [], requested_by_user_id: currentUser.id, created_at: first.created_at, status: "open", assignee_user_id: null, claimed_at: null, response_content: null, responded_by_user_id: null, responded_at: null, resolved_at: null };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] }))
+    .mockResolvedValueOnce(jsonResponse([first, second]))
+    .mockResolvedValueOnce(jsonResponse(detail(first)))
+    .mockResolvedValueOnce(jsonResponse([handoff]))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveClaim = resolve; }))
+    .mockResolvedValueOnce(jsonResponse(detail(second)));
+  vi.stubGlobal("fetch", fetchMock); render(<Home />);
+  await screen.findByText("進行中の商談");
+  fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+  expect(await screen.findByText("古い引継ぎ")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "受け取る" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+  resolveClaim?.(jsonResponse({ ...handoff, status: "claimed", assignee_user_id: currentUser.id, claimed_at: first.created_at }));
+  await waitFor(() => expect(screen.queryByText("古い引継ぎ")).toBeNull());
+  expect(screen.queryByRole("button", { name: "回答して解決" })).toBeNull();
+  expect(resolveResponse).toBeUndefined();
+});
+
+it("discards a delayed handoff response after switching conversations", async () => {
+  let resolveResponse: ((response: Response) => void) | undefined;
+  const first = { id: "handoff-response-1", organization_id: "org-1", status: "active", created_at: "2026-09-05T12:00:00Z" };
+  const second = { ...first, id: "handoff-response-2" };
+  const detail = (conversation: typeof first) => ({ ...conversation, created_by_user_id: currentUser.id, participants: [], messages: [] });
+  const handoff = { approval_request_id: "handoff-response", conversation_id: first.id, target: "営業支援", summary: "古い回答", evidence: [], requested_by_user_id: currentUser.id, created_at: first.created_at, status: "claimed", assignee_user_id: currentUser.id, claimed_at: first.created_at, response_content: null, responded_by_user_id: null, responded_at: null, resolved_at: null };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] }))
+    .mockResolvedValueOnce(jsonResponse([first, second]))
+    .mockResolvedValueOnce(jsonResponse(detail(first)))
+    .mockResolvedValueOnce(jsonResponse([handoff]))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveResponse = resolve; }))
+    .mockResolvedValueOnce(jsonResponse(detail(second)));
+  vi.stubGlobal("fetch", fetchMock); render(<Home />);
+  await screen.findByText("進行中の商談");
+  fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+  expect(await screen.findByText("古い回答")).toBeDefined();
+  fireEvent.change(screen.getByLabelText("回答 営業支援"), { target: { value: "古い会話への回答" } });
+  fireEvent.click(screen.getByRole("button", { name: "回答して解決" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+  resolveResponse?.(jsonResponse({ ...handoff, status: "resolved", response_content: "古い会話への回答", responded_by_user_id: currentUser.id, responded_at: first.created_at, resolved_at: first.created_at }));
+  await waitFor(() => expect(screen.queryByText("古い回答")).toBeNull());
+  expect(screen.queryByText("古い会話への回答")).toBeNull();
+});
+
+it("keeps the global handoff inbox after loading answers for the selected conversation", async () => {
+  const detail = { id: "conversation-answer", organization_id: "org-1", created_by_user_id: currentUser.id, status: "active", created_at: "2026-09-05T12:00:00Z", participants: [], messages: [] };
+  const inboxHandoff = { approval_request_id: "inbox-other", conversation_id: "other-conversation", target: "営業支援", summary: "別商談の未対応", evidence: [], requested_by_user_id: currentUser.id, created_at: detail.created_at, status: "open", assignee_user_id: null, claimed_at: null, response_content: null, responded_by_user_id: null, responded_at: null, resolved_at: null };
+  const answered = { ...inboxHandoff, approval_request_id: "answered", conversation_id: detail.id, summary: "現在の商談", status: "resolved", response_content: "回答内容", assignee_user_id: currentUser.id, responded_by_user_id: currentUser.id, responded_at: detail.created_at, resolved_at: detail.created_at };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] }))
+    .mockResolvedValueOnce(jsonResponse([{ id: detail.id, organization_id: detail.organization_id, status: detail.status, created_at: detail.created_at }]))
+    .mockResolvedValueOnce(jsonResponse(detail))
+    .mockResolvedValueOnce(jsonResponse([inboxHandoff]))
+    .mockResolvedValueOnce(jsonResponse([answered]));
+  vi.stubGlobal("fetch", fetchMock); render(<Home />);
+  await screen.findByText("進行中の商談");
+  fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+  expect(await screen.findByText("別商談の未対応")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "引継ぎ回答を確認" }));
+  expect(await screen.findByText("回答内容")).toBeDefined();
+  expect(screen.getByText("別商談の未対応")).toBeDefined();
+});

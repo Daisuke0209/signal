@@ -6,13 +6,18 @@ import Link from "next/link";
 import {
   addMessage,
   ApprovalRequest,
+  Handoff,
   Conversation,
   ConversationDetail,
   createConversation,
   createInternalHandoffApproval,
+  claimHandoff,
   CurrentUser,
   decideApproval,
   endConversation,
+  listConversationHandoffs,
+  listHandoffs,
+  respondToHandoff,
   getConversation,
   getCurrentUser,
   listApprovals,
@@ -44,11 +49,19 @@ import { ConversationDocuments } from "@/components/conversation-documents";
 
 const DEMO_EMAIL = "demo@signal.local";
 
-function suggestionsFor(run: SuggestionRun | null, kind: SuggestionKind): Suggestion[] {
-  return run?.suggestions.filter((suggestion) => suggestion.kind === kind) ?? [];
+function suggestionsFor(
+  run: SuggestionRun | null,
+  kind: SuggestionKind,
+): Suggestion[] {
+  return (
+    run?.suggestions.filter((suggestion) => suggestion.kind === kind) ?? []
+  );
 }
 
-function suggestionStatus(run: SuggestionRun | null, connectionError: boolean): string {
+function suggestionStatus(
+  run: SuggestionRun | null,
+  connectionError: boolean,
+): string {
   if (connectionError) return "提案の接続が切れています";
   if (run?.status === "queued") return "提案を準備中";
   if (run?.status === "running") {
@@ -72,7 +85,9 @@ function isOlderSuggestionRun(
 }
 
 function approvalStatus(status: ApprovalRequest["status"]): string {
-  return { pending: "承認待ち", approved: "承認済み", rejected: "却下済み" }[status];
+  return { pending: "承認待ち", approved: "承認済み", rejected: "却下済み" }[
+    status
+  ];
 }
 
 function SuggestionItems({ suggestions }: { suggestions: Suggestion[] }) {
@@ -92,7 +107,15 @@ function SuggestionItems({ suggestions }: { suggestions: Suggestion[] }) {
                   className={styles.source}
                   key={`${source.document_id}:${source.page_number}:${source.excerpt}`}
                 >
-                  <summary><a href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/documents/${source.document_id}/file#page=${source.page_number}`} target="_blank" rel="noreferrer">{source.document_name} · p.{source.page_number}</a></summary>
+                  <summary>
+                    <a
+                      href={`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"}/documents/${source.document_id}/file#page=${source.page_number}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {source.document_name} · p.{source.page_number}
+                    </a>
+                  </summary>
                   <p>{source.excerpt}</p>
                 </details>
               ))}
@@ -143,6 +166,21 @@ export default function Home() {
   const [handoffTarget, setHandoffTarget] = useState("営業支援");
   const [handoffSummary, setHandoffSummary] = useState("");
   const approvalGeneration = useRef(0);
+  const [handoffs, setHandoffs] = useState<Handoff[]>([]);
+  const [conversationHandoffs, setConversationHandoffs] = useState<Handoff[]>([]);
+  const [handoffInboxOpen, setHandoffInboxOpen] = useState(false);
+  const [handoffReply, setHandoffReply] = useState<Record<string, string>>({});
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [handoffError, setHandoffError] = useState("");
+  const handoffGeneration = useRef(0);
+  function resetHandoffs() {
+    handoffGeneration.current += 1;
+    setHandoffs([]);
+    setConversationHandoffs([]);
+    setHandoffInboxOpen(false);
+    setHandoffReply({});
+    setHandoffError("");
+  }
   function resetApprovals() {
     approvalGeneration.current += 1;
     setApprovals([]);
@@ -168,7 +206,13 @@ export default function Home() {
     setCaptureState("停止中");
   }
   async function beginCapture() {
-    if (busy || isCapturing || !conversation || conversation.status !== "active") return;
+    if (
+      busy ||
+      isCapturing ||
+      !conversation ||
+      conversation.status !== "active"
+    )
+      return;
     const generation = captureGeneration.current + 1;
     captureGeneration.current = generation;
     setError("");
@@ -197,7 +241,10 @@ export default function Home() {
           setError("マイク音声が終了しました。");
         });
       setCaptureState("文字起こしに接続中…");
-      const connection = await startLiveTranscription(nextCapture, conversation.id, aborter.signal,
+      const connection = await startLiveTranscription(
+        nextCapture,
+        conversation.id,
+        aborter.signal,
         (update) => {
           if (captureGeneration.current !== generation) return;
           latestTranscript.current = update;
@@ -212,18 +259,29 @@ export default function Home() {
             const message = update.message;
             setSuggestionRun(null);
             setSuggestionConnectionError(false);
-            setConversation((old) => old?.id === conversation.id ? {
-              ...old, messages: [...old.messages.filter((m) => m.id !== message.id), message]
-                .sort((a, b) => a.sequence_number - b.sequence_number),
-            } : old);
+            setConversation((old) =>
+              old?.id === conversation.id
+                ? {
+                    ...old,
+                    messages: [
+                      ...old.messages.filter((m) => m.id !== message.id),
+                      message,
+                    ].sort((a, b) => a.sequence_number - b.sequence_number),
+                  }
+                : old,
+            );
           }
         },
         (message) => {
           if (captureGeneration.current !== generation) return;
           stopCapture();
           setError(message);
-        });
-      if (captureGeneration.current !== generation) { connection.abort(); return; }
+        },
+      );
+      if (captureGeneration.current !== generation) {
+        connection.abort();
+        return;
+      }
       live.current = connection;
       setCaptureState("文字起こし中");
     } catch (captureError) {
@@ -231,13 +289,17 @@ export default function Home() {
       const connecting = capture.current !== null;
       const reason = captureFailure(captureError);
       setError(
-        connecting ? transcriptionError(captureError instanceof Error ? captureError.message : "") : reason === "missing-tab-audio"
-          ? "共有したタブに音声がありません。タブ音声を共有してください。"
-          : reason === "missing-microphone-audio"
-            ? "マイクから音声を取得できませんでした。マイクを確認してください。"
-            : reason === "permission-denied"
-              ? "共有またはマイクの権限が許可されませんでした。"
-              : "音声共有がキャンセルされました。",
+        connecting
+          ? transcriptionError(
+              captureError instanceof Error ? captureError.message : "",
+            )
+          : reason === "missing-tab-audio"
+            ? "共有したタブに音声がありません。タブ音声を共有してください。"
+            : reason === "missing-microphone-audio"
+              ? "マイクから音声を取得できませんでした。マイクを確認してください。"
+              : reason === "permission-denied"
+                ? "共有またはマイクの権限が許可されませんでした。"
+                : "音声共有がキャンセルされました。",
       );
       stopCapture();
     } finally {
@@ -254,7 +316,8 @@ export default function Home() {
       await live.current.stop();
       return true;
     } catch {
-      if (captureGeneration.current === generation) setError(transcriptionError("stop_failed"));
+      if (captureGeneration.current === generation)
+        setError(transcriptionError("stop_failed"));
       return false;
     } finally {
       if (captureGeneration.current === generation) stopCapture();
@@ -263,24 +326,45 @@ export default function Home() {
   useEffect(() => () => stopCapture(), []);
   const conversationId = conversation?.id;
   useEffect(() => {
-    if (!conversationId || !suggestionRun || suggestionRun.status !== "succeeded") return;
+    if (
+      !conversationId ||
+      !suggestionRun ||
+      suggestionRun.status !== "succeeded"
+    )
+      return;
     const timestamp = receivedAt(suggestionRun);
     if (timestamp === undefined) return; // Restored GET state is not live latency.
-    return observePaint(conversationId, {
-      kind: "suggestion", run_id: suggestionRun.id, revision: suggestionRun.revision,
-    }, timestamp);
+    return observePaint(
+      conversationId,
+      {
+        kind: "suggestion",
+        run_id: suggestionRun.id,
+        revision: suggestionRun.revision,
+      },
+      timestamp,
+    );
   }, [conversationId, suggestionRun]);
   useEffect(() => {
     const update = latestTranscript.current;
     if (!conversationId || !update?.session_id) return;
     const timestamp = receivedAt(update);
     if (timestamp === undefined) return;
-    if (update.type === "partial" && observedPartialSessions.current.has(update.session_id)) return;
-    if (update.type === "partial") observedPartialSessions.current.add(update.session_id);
-    return observePaint(conversationId, {
-      kind: update.type === "final" ? "transcript_final" : "transcript_partial",
-      session_id: update.session_id,
-    }, timestamp);
+    if (
+      update.type === "partial" &&
+      observedPartialSessions.current.has(update.session_id)
+    )
+      return;
+    if (update.type === "partial")
+      observedPartialSessions.current.add(update.session_id);
+    return observePaint(
+      conversationId,
+      {
+        kind:
+          update.type === "final" ? "transcript_final" : "transcript_partial",
+        session_id: update.session_id,
+      },
+      timestamp,
+    );
   }, [conversationId, partials]);
 
   useEffect(() => {
@@ -318,6 +402,7 @@ export default function Home() {
       setSuggestionRun(null);
       setSuggestionConnectionError(false);
       resetApprovals();
+      resetHandoffs();
       setConversation(null);
       setItems([]);
       setUser(null);
@@ -338,6 +423,25 @@ export default function Home() {
       closeEvents();
     };
   }, [conversationId, user]);
+  async function loadConversationHandoffs() {
+    if (!conversation) return;
+    const generation = handoffGeneration.current;
+    const conversationId = conversation.id;
+    setHandoffBusy(true);
+    setHandoffError("");
+    try {
+      const items = await listConversationHandoffs(conversationId);
+      if (handoffGeneration.current === generation)
+        setConversationHandoffs(items);
+    } catch {
+      if (handoffGeneration.current === generation)
+        setHandoffError(
+          "引継ぎ回答を読み込めませんでした。もう一度お試しください。",
+        );
+    } finally {
+      if (handoffGeneration.current === generation) setHandoffBusy(false);
+    }
+  }
   async function load() {
     const conversations = await listConversations();
     setItems(conversations);
@@ -381,6 +485,7 @@ export default function Home() {
     setSuggestionRun(null);
     setSuggestionConnectionError(false);
     resetApprovals();
+    resetHandoffs();
     setBusy(true);
     try {
       setConversation(await getConversation(id));
@@ -388,6 +493,68 @@ export default function Home() {
       setError("会話を読み込めませんでした。");
     } finally {
       setBusy(false);
+    }
+  }
+  async function loadHandoffs() {
+    const generation = handoffGeneration.current;
+    setHandoffBusy(true);
+    setHandoffError("");
+    try {
+      const inbox = await listHandoffs();
+      if (handoffGeneration.current === generation) setHandoffs(inbox);
+    } catch {
+      if (handoffGeneration.current === generation)
+        setHandoffError(
+          "引継ぎを読み込めませんでした。もう一度お試しください。",
+        );
+    } finally {
+      if (handoffGeneration.current === generation) setHandoffBusy(false);
+    }
+  }
+  async function claim(approvalId: string) {
+    const generation = handoffGeneration.current;
+    setHandoffBusy(true);
+    try {
+      const updated = await claimHandoff(approvalId);
+      if (handoffGeneration.current === generation)
+        setHandoffs((items) =>
+          items.map((item) =>
+            item.approval_request_id === updated.approval_request_id
+              ? updated
+              : item,
+          ),
+        );
+    } catch {
+      if (handoffGeneration.current === generation)
+        setHandoffError(
+          "引継ぎを受け取れませんでした。もう一度お試しください。",
+        );
+    } finally {
+      if (handoffGeneration.current === generation) setHandoffBusy(false);
+    }
+  }
+  async function respond(approvalId: string) {
+    const content = handoffReply[approvalId]?.trim();
+    if (!content) return;
+    const generation = handoffGeneration.current;
+    setHandoffBusy(true);
+    try {
+      const updated = await respondToHandoff(approvalId, content);
+      if (handoffGeneration.current === generation) {
+        setHandoffs((items) =>
+          items.map((item) =>
+            item.approval_request_id === updated.approval_request_id
+              ? updated
+              : item,
+          ),
+        );
+        setHandoffReply((items) => ({ ...items, [approvalId]: "" }));
+      }
+    } catch {
+      if (handoffGeneration.current === generation)
+        setHandoffError("回答を保存できませんでした。もう一度お試しください。");
+    } finally {
+      if (handoffGeneration.current === generation) setHandoffBusy(false);
     }
   }
   async function loadApprovals() {
@@ -403,7 +570,9 @@ export default function Home() {
       setApprovalsLoaded(true);
     } catch {
       if (approvalGeneration.current === generation)
-        setApprovalError("承認依頼を読み込めませんでした。もう一度お試しください。");
+        setApprovalError(
+          "承認依頼を読み込めませんでした。もう一度お試しください。",
+        );
     } finally {
       if (approvalGeneration.current === generation) setApprovalBusy(false);
     }
@@ -415,7 +584,8 @@ export default function Home() {
   }
   async function requestHandoff(event: FormEvent) {
     event.preventDefault();
-    if (!conversation || !handoffTarget.trim() || !handoffSummary.trim()) return;
+    if (!conversation || !handoffTarget.trim() || !handoffSummary.trim())
+      return;
     const generation = approvalGeneration.current;
     const conversationId = conversation.id;
     setApprovalBusy(true);
@@ -432,7 +602,9 @@ export default function Home() {
       setHandoffSummary("");
     } catch {
       if (approvalGeneration.current === generation)
-        setApprovalError("承認依頼を作成できませんでした。もう一度お試しください。");
+        setApprovalError(
+          "承認依頼を作成できませんでした。もう一度お試しください。",
+        );
     } finally {
       if (approvalGeneration.current === generation) setApprovalBusy(false);
     }
@@ -444,11 +616,16 @@ export default function Home() {
     try {
       const decided = await decideApproval(approvalId, decision);
       if (approvalGeneration.current !== generation) return;
-      setApprovals((current) => current.map((approval) =>
-        approval.id === decided.id ? decided : approval));
+      setApprovals((current) =>
+        current.map((approval) =>
+          approval.id === decided.id ? decided : approval,
+        ),
+      );
     } catch {
       if (approvalGeneration.current === generation)
-        setApprovalError("承認結果を保存できませんでした。もう一度お試しください。");
+        setApprovalError(
+          "承認結果を保存できませんでした。もう一度お試しください。",
+        );
     } finally {
       if (approvalGeneration.current === generation) setApprovalBusy(false);
     }
@@ -466,6 +643,7 @@ export default function Home() {
       setSuggestionRun(null);
       setSuggestionConnectionError(false);
       resetApprovals();
+      resetHandoffs();
       setItems((old) => [created, ...old]);
       setConversation(await getConversation(created.id));
     } catch {
@@ -500,7 +678,9 @@ export default function Home() {
     setError("");
     try {
       if (isCapturing && !(await finishCapture())) {
-        setError("音声の確定に失敗しました。商談は進行中のまま、もう一度お試しください。");
+        setError(
+          "音声の確定に失敗しました。商談は進行中のまま、もう一度お試しください。",
+        );
         return;
       }
       const ended = await endConversation(conversation.id);
@@ -515,7 +695,9 @@ export default function Home() {
         ),
       );
     } catch {
-      setError("商談を終了できませんでした。進行中のまま、もう一度お試しください。");
+      setError(
+        "商談を終了できませんでした。進行中のまま、もう一度お試しください。",
+      );
     } finally {
       setBusy(false);
     }
@@ -527,6 +709,7 @@ export default function Home() {
       await logout();
       stopCapture();
       resetApprovals();
+      resetHandoffs();
       setUser(null);
       setConversation(null);
       setItems([]);
@@ -622,6 +805,70 @@ export default function Home() {
             <p className={styles.listEmpty}>まだ商談がありません</p>
           )}
         </nav>
+        <section className={styles.handoffInbox}>
+          <button
+            onClick={() => {
+              setHandoffInboxOpen(!handoffInboxOpen);
+              if (!handoffInboxOpen) void loadHandoffs();
+            }}
+            disabled={handoffBusy}
+          >
+            引継ぎ受信箱 {handoffInboxOpen ? "−" : "＋"}
+          </button>
+          {handoffInboxOpen && (
+            <div>
+              {handoffError && <p role="alert">{handoffError}</p>}
+              {handoffs
+                .filter((item) => item.status !== "resolved")
+                .map((handoff) => (
+                  <article key={handoff.approval_request_id}>
+                    <strong>{handoff.target}</strong>
+                    <p>{handoff.summary}</p>
+                    {handoff.status === "open" && (
+                      <button
+                        disabled={handoffBusy}
+                        onClick={() => void claim(handoff.approval_request_id)}
+                      >
+                        受け取る
+                      </button>
+                    )}
+                    {handoff.status === "claimed" &&
+                      handoff.assignee_user_id === user.id && (
+                      <>
+                        <textarea
+                          aria-label={`回答 ${handoff.target}`}
+                          value={
+                            handoffReply[handoff.approval_request_id] ?? ""
+                          }
+                          onChange={(event) =>
+                            setHandoffReply((items) => ({
+                              ...items,
+                              [handoff.approval_request_id]: event.target.value,
+                            }))
+                          }
+                        />
+                        <button
+                          disabled={
+                            handoffBusy ||
+                            !handoffReply[handoff.approval_request_id]?.trim()
+                          }
+                          onClick={() =>
+                            void respond(handoff.approval_request_id)
+                          }
+                        >
+                          回答して解決
+                        </button>
+                      </>
+                    )}
+                    {handoff.status === "claimed" &&
+                      handoff.assignee_user_id !== user.id && (
+                        <p>別の担当者が対応中です。</p>
+                      )}
+                  </article>
+                ))}
+            </div>
+          )}
+        </section>
         <div className={styles.profile}>
           <span className={styles.avatar} aria-hidden="true">
             {user.name.slice(0, 1)}
@@ -663,7 +910,11 @@ export default function Home() {
               {captureState}
             </span>
             {isCapturing ? (
-              <button className={styles.stopButton} disabled={busy || isStopping} onClick={() => void finishCapture()}>
+              <button
+                className={styles.stopButton}
+                disabled={busy || isStopping}
+                onClick={() => void finishCapture()}
+              >
                 音声取得を停止
               </button>
             ) : (
@@ -735,37 +986,45 @@ export default function Home() {
                   <p>{message.content}</p>
                 </article>
               ))}
-               {Object.entries(partials).map(([key, update]) => (
-                <article className={styles.message} data-speaker={update.side} data-partial="true" key={key}>
+              {Object.entries(partials).map(([key, update]) => (
+                <article
+                  className={styles.message}
+                  data-speaker={update.side}
+                  data-partial="true"
+                  key={key}
+                >
                   <div className={styles.speaker}>
                     <span aria-hidden="true" />
-                    {update.source === "microphone" ? "自分（マイク）" : "通話相手（共有音声）"}
+                    {update.source === "microphone"
+                      ? "自分（マイク）"
+                      : "通話相手（共有音声）"}
                     <small>聞き取り中</small>
                   </div>
                   <p>{update.text || "…"}</p>
                 </article>
               ))}
-               {!conversation?.messages.length && !Object.keys(partials).length && (
-                <div className={styles.transcriptEmpty}>
-                  <span className={styles.soundMark} aria-hidden="true">
-                    <i />
-                    <i />
-                    <i />
-                    <i />
-                    <i />
-                  </span>
-                  <h3>
-                    {conversation
-                      ? "会話を受け取る準備ができました"
-                      : "新しい商談をはじめましょう"}
-                  </h3>
-                  <p>
-                    {conversation
-                      ? "上部からMeetのタブ音声とマイクを共有してください。"
-                      : "「新規作成」から商談を作成すると、音声を接続できます。"}
-                  </p>
-                </div>
-              )}
+              {!conversation?.messages.length &&
+                !Object.keys(partials).length && (
+                  <div className={styles.transcriptEmpty}>
+                    <span className={styles.soundMark} aria-hidden="true">
+                      <i />
+                      <i />
+                      <i />
+                      <i />
+                      <i />
+                    </span>
+                    <h3>
+                      {conversation
+                        ? "会話を受け取る準備ができました"
+                        : "新しい商談をはじめましょう"}
+                    </h3>
+                    <p>
+                      {conversation
+                        ? "上部からMeetのタブ音声とマイクを共有してください。"
+                        : "「新規作成」から商談を作成すると、音声を接続できます。"}
+                    </p>
+                  </div>
+                )}
             </div>
             {conversation?.status === "active" && (
               <div className={styles.manualTools}>
@@ -849,45 +1108,155 @@ export default function Home() {
                 suggestions={suggestionsFor(suggestionRun, "confirmation")}
               />
             </section>
-            <section className={styles.approvalSection} aria-labelledby="approval-title">
-              <button className={styles.approvalToggle} aria-expanded={approvalsOpen}
-                aria-controls="approval-panel" onClick={() => void toggleApprovals()}
-                disabled={!conversation || approvalBusy}>
-                <span><span aria-hidden="true">✓</span><strong id="approval-title">承認が必要な操作</strong></span>
+            <section
+              className={styles.approvalSection}
+              aria-labelledby="approval-title"
+            >
+              <button
+                className={styles.approvalToggle}
+                aria-expanded={approvalsOpen}
+                aria-controls="approval-panel"
+                onClick={() => void toggleApprovals()}
+                disabled={!conversation || approvalBusy}
+              >
+                <span>
+                  <span aria-hidden="true">✓</span>
+                  <strong id="approval-title">承認が必要な操作</strong>
+                </span>
                 <span>{approvalsOpen ? "閉じる" : "確認する"}</span>
               </button>
-              {approvalsOpen && <div id="approval-panel" className={styles.approvalPanel}>
-                {approvalError && <p className={styles.approvalError} role="alert">{approvalError}</p>}
-                <form className={styles.approvalForm} onSubmit={requestHandoff}>
-                  <p>社内引継ぎを作成する前に、内容と影響範囲を確認します。</p>
-                  <label>引継ぎ先<input value={handoffTarget} maxLength={255}
-                    onChange={(event) => setHandoffTarget(event.target.value)} /></label>
-                  <label>依頼内容<textarea value={handoffSummary} maxLength={4000}
-                    onChange={(event) => setHandoffSummary(event.target.value)}
-                    placeholder="依頼する内容を入力" /></label>
-                  <button disabled={approvalBusy || !handoffTarget.trim() || !handoffSummary.trim()}>承認依頼を作成</button>
-                </form>
-                {approvalsLoaded && !approvals.length && <p className={styles.approvalEmpty}>承認待ちの操作はありません。</p>}
-                <div className={styles.approvalList}>
-                  {approvals.map((approval) => <article className={styles.approvalItem} key={approval.id}>
-                    <div className={styles.approvalItemHead}><strong>社内引継ぎ</strong>
-                      <span data-status={approval.status}>{approvalStatus(approval.status)}</span></div>
-                    <dl><div><dt>引継ぎ先</dt><dd>{approval.target}</dd></div>
-                      <div><dt>依頼内容</dt><dd>{approval.input.summary}</dd></div></dl>
-                    {approval.evidence.length > 0 && <div className={styles.approvalEvidence}>
-                      <p>確認した資料</p>{approval.evidence.map((source) => <details
-                        key={`${source.document_id}:${source.page_number}`}>
-                        <summary>{source.document_name} · p.{source.page_number}</summary><p>{source.excerpt}</p>
-                      </details>)}
-                    </div>}
-                    {approval.status === "pending" && <div className={styles.approvalActions}>
-                      <button disabled={approvalBusy} onClick={() => void decide(approval.id, "approve")}>承認</button>
-                      <button disabled={approvalBusy} onClick={() => void decide(approval.id, "reject")}>却下</button>
-                    </div>}
-                  </article>)}
+              {approvalsOpen && (
+                <div id="approval-panel" className={styles.approvalPanel}>
+                  {approvalError && (
+                    <p className={styles.approvalError} role="alert">
+                      {approvalError}
+                    </p>
+                  )}
+                  <form
+                    className={styles.approvalForm}
+                    onSubmit={requestHandoff}
+                  >
+                    <p>
+                      社内引継ぎを作成する前に、内容と影響範囲を確認します。
+                    </p>
+                    <label>
+                      引継ぎ先
+                      <input
+                        value={handoffTarget}
+                        maxLength={255}
+                        onChange={(event) =>
+                          setHandoffTarget(event.target.value)
+                        }
+                      />
+                    </label>
+                    <label>
+                      依頼内容
+                      <textarea
+                        value={handoffSummary}
+                        maxLength={4000}
+                        onChange={(event) =>
+                          setHandoffSummary(event.target.value)
+                        }
+                        placeholder="依頼する内容を入力"
+                      />
+                    </label>
+                    <button
+                      disabled={
+                        approvalBusy ||
+                        !handoffTarget.trim() ||
+                        !handoffSummary.trim()
+                      }
+                    >
+                      承認依頼を作成
+                    </button>
+                  </form>
+                  {approvalsLoaded && !approvals.length && (
+                    <p className={styles.approvalEmpty}>
+                      承認待ちの操作はありません。
+                    </p>
+                  )}
+                  <div className={styles.approvalList}>
+                    {approvals.map((approval) => (
+                      <article
+                        className={styles.approvalItem}
+                        key={approval.id}
+                      >
+                        <div className={styles.approvalItemHead}>
+                          <strong>社内引継ぎ</strong>
+                          <span data-status={approval.status}>
+                            {approvalStatus(approval.status)}
+                          </span>
+                        </div>
+                        <dl>
+                          <div>
+                            <dt>引継ぎ先</dt>
+                            <dd>{approval.target}</dd>
+                          </div>
+                          <div>
+                            <dt>依頼内容</dt>
+                            <dd>{approval.input.summary}</dd>
+                          </div>
+                        </dl>
+                        {approval.evidence.length > 0 && (
+                          <div className={styles.approvalEvidence}>
+                            <p>確認した資料</p>
+                            {approval.evidence.map((source) => (
+                              <details
+                                key={`${source.document_id}:${source.page_number}`}
+                              >
+                                <summary>
+                                  {source.document_name} · p.
+                                  {source.page_number}
+                                </summary>
+                                <p>{source.excerpt}</p>
+                              </details>
+                            ))}
+                          </div>
+                        )}
+                        {approval.status === "pending" && (
+                          <div className={styles.approvalActions}>
+                            <button
+                              disabled={approvalBusy}
+                              onClick={() =>
+                                void decide(approval.id, "approve")
+                              }
+                            >
+                              承認
+                            </button>
+                            <button
+                              disabled={approvalBusy}
+                              onClick={() => void decide(approval.id, "reject")}
+                            >
+                              却下
+                            </button>
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
                 </div>
-              </div>}
+              )}
             </section>
+            {conversation && (
+              <button
+                className={styles.handoffAnswerToggle}
+                disabled={handoffBusy}
+                onClick={() => void loadConversationHandoffs()}
+              >
+                引継ぎ回答を確認
+              </button>
+            )}
+            {conversationHandoffs
+              .filter((handoff) => handoff.response_content)
+              .map((handoff) => (
+                <section
+                  className={styles.handoffAnswer}
+                  key={handoff.approval_request_id}
+                >
+                  <h3>引継ぎの回答</h3>
+                  <p>{handoff.response_content}</p>
+                </section>
+              ))}
           </aside>
         </div>
       </div>

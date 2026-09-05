@@ -688,8 +688,16 @@
   }
 }
 
-.message[data-partial="true"] { opacity: .72; border-left: 2px solid #809286; }
-.speaker small { margin-left: auto; font-size: 11px; font-weight: 400; color: #708078; }
+.message[data-partial="true"] {
+  opacity: 0.72;
+  border-left: 2px solid #809286;
+}
+.speaker small {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 400;
+  color: #708078;
+}
 .approvalSection {
   padding: 24px 4px 4px;
 }
@@ -867,4 +875,69 @@
   color: #94423c;
   font-size: 11px;
   line-height: 1.6;
+}
+.handoffInbox {
+  margin: 18px 10px 0;
+  border-top: 1px solid var(--border);
+  padding-top: 14px;
+}
+.handoffInbox > button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-align: left;
+}
+.handoffInbox article {
+  margin-top: 10px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 11px;
+}
+.handoffInbox article p {
+  margin: 6px 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.handoffInbox textarea {
+  width: 100%;
+  min-height: 56px;
+  margin: 6px 0;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  font: inherit;
+}
+.handoffInbox article button {
+  min-height: 30px;
+  padding: 5px 8px;
+  border: 1px solid #344359;
+  border-radius: 5px;
+  background: #344359;
+  color: white;
+  font-size: 10px;
+}
+.handoffAnswer {
+  padding: 18px 4px;
+  border-top: 1px solid var(--border);
+}
+.handoffAnswer h3 {
+  color: #51617b;
+  font-size: 12px;
+}
+.handoffAnswer p {
+  margin-top: 8px;
+  color: #435067;
+  font-size: 12px;
+  line-height: 1.7;
+}
+.handoffAnswerToggle {
+  margin-top: 18px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #566f95;
+  font-size: 11px;
 }
