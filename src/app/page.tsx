@@ -8,6 +8,7 @@ import {
   ConversationDetail,
   createConversation,
   CurrentUser,
+  endConversation,
   getConversation,
   getCurrentUser,
   listConversations,
@@ -371,6 +372,28 @@ export default function Home() {
       setBusy(false);
     }
   }
+  async function end() {
+    if (!conversation || conversation.status !== "active") return;
+    setBusy(true);
+    setError("");
+    try {
+      const ended = await endConversation(conversation.id);
+      stopCapture();
+      setShowManualInput(false);
+      setConversation((current) =>
+        current?.id === ended.id ? { ...current, status: "ended" } : current,
+      );
+      setItems((current) =>
+        current.map((item) =>
+          item.id === ended.id ? { ...item, status: "ended" } : item,
+        ),
+      );
+    } catch {
+      setError("商談を終了できませんでした。進行中のまま、もう一度お試しください。");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function signOut() {
     setBusy(true);
     setError("");
@@ -528,8 +551,22 @@ export default function Home() {
                 Meet音声とマイクを取得
               </button>
             )}
+            {conversation?.status === "active" && (
+              <button
+                className={styles.endButton}
+                disabled={busy}
+                onClick={() => void end()}
+              >
+                商談を終了
+              </button>
+            )}
           </div>
         </header>
+        {conversation?.status === "ended" && (
+          <p className={styles.endedNotice} role="status">
+            この商談は終了しました。文字起こしと発言の追加はできません。
+          </p>
+        )}
         {error && (
           <p className={styles.error} role="alert">
             {error}

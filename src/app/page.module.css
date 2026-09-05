@@ -241,6 +241,23 @@
   font-size: 12px;
   font-weight: 500;
 }
+.endButton {
+  padding: 10px 12px;
+  border: 1px solid #e5d5d5;
+  border-radius: 8px;
+  background: white;
+  color: #964747;
+  font-size: 12px;
+}
+.endedNotice {
+  margin: 14px 38px 0;
+  padding: 10px 13px;
+  border: 1px solid #dce2e9;
+  border-radius: 8px;
+  background: #f6f8fa;
+  color: #657184;
+  font-size: 12px;
+}
 .primaryButton:hover {
   background: #3b485c;
 }
