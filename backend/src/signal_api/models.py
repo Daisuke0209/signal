@@ -602,7 +602,7 @@ class ApprovalRequest(Base):
         nullable=False,
     )
     operation: Mapped[str] = mapped_column(String(100), nullable=False)
-    target: Mapped[str] = mapped_column(Text, nullable=False)
+    target: Mapped[str] = mapped_column(String(255), nullable=False)
     input: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     evidence: Mapped[list[dict[str, object]]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
@@ -612,6 +612,7 @@ class ApprovalRequest(Base):
             ApprovalRequestStatus,
             values_callable=lambda members: [m.value for m in members],
             name="approval_request_status",
+            length=20,
             native_enum=False,
             create_constraint=False,
         ),
