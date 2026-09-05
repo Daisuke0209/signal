@@ -28,6 +28,17 @@ function formatRegisteredAt(value: string): string {
   }).format(new Date(value));
 }
 
+function processingErrorLabel(document: Document): string | null {
+  if (!document.processing_error) return null;
+  if (document.processing_status === "failed") {
+    return "PDFの解析に失敗しました。原本を確認して再度お試しください。";
+  }
+  if (document.processing_status === "text_unavailable") {
+    return "PDFから本文を取得できませんでした。";
+  }
+  return document.processing_error;
+}
+
 export default function DocumentsPage() {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [organizationId, setOrganizationId] = useState("");
@@ -242,8 +253,8 @@ export default function DocumentsPage() {
                   <p>
                     {formatRegisteredAt(document.created_at)} · {document.uploaded_by_name}
                   </p>
-                  {document.processing_error && (
-                    <p className={styles.failure}>{document.processing_error}</p>
+                  {processingErrorLabel(document) && (
+                    <p className={styles.failure}>{processingErrorLabel(document)}</p>
                   )}
                 </div>
                 <span data-status={document.processing_status}>

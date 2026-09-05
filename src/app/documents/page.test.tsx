@@ -255,7 +255,9 @@ describe("document management page", () => {
 
     expect(await screen.findByText("画像PDF.pdf")).toBeDefined();
     expect(screen.getByText("解析に失敗")).toBeDefined();
-    expect(screen.getByText("PDF extraction failed")).toBeDefined();
+    expect(
+      screen.getByText("PDFの解析に失敗しました。原本を確認して再度お試しください。"),
+    ).toBeDefined();
     expect(
       screen.getByRole("link", { name: "商談ワークスペースへ戻る" }),
     ).toHaveProperty("href", expect.stringContaining("/"));
