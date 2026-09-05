@@ -189,17 +189,11 @@
   padding: 24px 38px;
   border-bottom: 1px solid var(--border);
 }
-.eyebrow {
-  font-size: 9px;
-  font-weight: 550;
-  letter-spacing: 1.8px;
-  color: var(--text-muted);
-}
 .sessionHeader h1 {
   font-size: 21px;
   font-weight: 580;
   letter-spacing: -0.7px;
-  margin-top: 8px;
+  margin-top: 0;
 }
 .audioControls {
   display: flex;
@@ -266,7 +260,7 @@
   padding-bottom: 30px;
 }
 .panelHead h2 {
-  margin-top: 8px;
+  margin-top: 0;
   font-size: 17px;
   font-weight: 580;
   letter-spacing: -0.5px;
@@ -438,13 +432,6 @@
   font-weight: 550;
   color: #51617b;
 }
-.suggestionEmpty {
-  font-size: 24px;
-  line-height: 1.6;
-  letter-spacing: -0.8px;
-  color: #788ba8;
-  margin-top: 27px;
-}
 .suggestionHint {
   margin-top: 10px;
   font-size: 11px;
@@ -460,13 +447,6 @@
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.9;
-}
-.assistFootnote {
-  margin-top: auto;
-  padding-top: 32px;
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.8;
 }
 .error {
   margin: 12px 24px 0;

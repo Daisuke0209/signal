@@ -343,7 +343,6 @@ export default function Home() {
       <div className={styles.stage}>
         <header className={styles.sessionHeader}>
           <div>
-            <p className={styles.eyebrow}>WORKSPACE</p>
             <h1>
               {conversation
                 ? conversation.status === "active"
@@ -400,7 +399,6 @@ export default function Home() {
           >
             <div className={styles.panelHead}>
               <div>
-                <p className={styles.eyebrow}>CONVERSATION</p>
                 <h2 id="transcript-title">文字起こし</h2>
               </div>
               <span className={styles.panelMeta}>
@@ -498,7 +496,6 @@ export default function Home() {
           <aside className={styles.assist} aria-labelledby="assist-title">
             <div className={styles.panelHead}>
               <div>
-                <p className={styles.eyebrow}>LIVE ASSIST</p>
                 <h2 id="assist-title">営業支援</h2>
               </div>
               <span className={styles.assistLabel}>提案を待機中</span>
@@ -508,7 +505,6 @@ export default function Home() {
                 <span aria-hidden="true">↗</span>
                 <h3>次に聞くこと</h3>
               </div>
-              <p className={styles.suggestionEmpty}>次の一問を、ここに。</p>
               <p className={styles.suggestionHint}>
                 会話に合わせた質問を表示します。
               </p>
@@ -527,9 +523,6 @@ export default function Home() {
               </div>
               <p>確認が必要な条件や、未解決の論点を表示します。</p>
             </section>
-            <p className={styles.assistFootnote}>
-              提案が表示されたら、内容を確認して会話にご活用ください。
-            </p>
           </aside>
         </div>
       </div>
