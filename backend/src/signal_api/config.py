@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     document_max_pages: int = 200
     document_max_extracted_text_bytes: int = 2_000_000
     openai_api_key: SecretStr | None = None
+    # Explicit opt-in is required before sending conversations/PDF evidence.
+    suggestions_enabled: bool = False
+    suggestion_model: str = "gpt-5.4-mini"
+    suggestion_timeout_seconds: float = Field(default=30, gt=0, le=120)
     transcription_model: str = "gpt-live-transcribe"
     transcription_energy_threshold: float = Field(default=0.005, gt=0, le=1)
 

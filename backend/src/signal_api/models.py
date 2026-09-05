@@ -17,7 +17,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -415,6 +415,12 @@ class SuggestionErrorCode(StrEnum):
 class SuggestionRun(Base):
     __tablename__ = "suggestion_runs"
     __table_args__ = (
+        CheckConstraint("revision >= 0", name="suggestion_runs_revision_check"),
+        CheckConstraint(
+            "phase IS NULL OR (status = 'running' AND "
+            "phase IN ('generating', 'searching'))",
+            name="suggestion_runs_phase_check",
+        ),
         CheckConstraint(
             "status IN ('queued', 'running', 'succeeded', 'failed')",
             name="suggestion_run_status",
@@ -455,6 +461,8 @@ class SuggestionRun(Base):
         UUID(as_uuid=True), nullable=False
     )
     generation: Mapped[int] = mapped_column(Integer, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    phase: Mapped[str | None] = mapped_column(String(16), nullable=True)
     input_sequence_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[SuggestionRunStatus] = mapped_column(
         Enum(
@@ -492,6 +500,9 @@ class Suggestion(Base):
     __tablename__ = "suggestions"
     __table_args__ = (
         CheckConstraint(
+            "jsonb_typeof(sources) = 'array'", name="suggestions_sources_check"
+        ),
+        CheckConstraint(
             "kind IN ('question', 'response', 'confirmation')",
             name="suggestion_kind",
         ),
@@ -523,6 +534,9 @@ class Suggestion(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
+    sources: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
 
 
 class DocumentPage(Base):

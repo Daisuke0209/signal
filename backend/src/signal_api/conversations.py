@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from signal_api.auth import CurrentUser
+from signal_api.config import get_settings
 from signal_api.database import get_db_session
 from signal_api.models import (
     Conversation,
@@ -17,6 +18,8 @@ from signal_api.models import (
     ConversationStatus,
     Membership,
 )
+from signal_api.suggestion_events import events
+from signal_api.suggestions import queue_suggestion_run
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -339,7 +342,15 @@ def create_conversation_message(
         content=request.content,
     )
     db.add(message)
+    db.flush()
+    run = (
+        queue_suggestion_run(db, conversation_id)
+        if get_settings().suggestions_enabled
+        else None
+    )
     db.commit()
+    if run:
+        events.queued(conversation_id, run.id, run.generation)
 
     return ConversationMessageResponse(
         id=message.id,
