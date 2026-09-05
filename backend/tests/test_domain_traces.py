@@ -41,7 +41,9 @@ def test_spans_measure_success_failure_and_hide_error_content(
     monkeypatch.setattr(domain_traces, "logger", logger)
     caplog.set_level(logging.INFO, logger=logger.name)
     clock = iter([10.0, 10.8, 20.0, 23.5, 30.0, 31.0])
-    monkeypatch.setattr(domain_traces.time, "perf_counter", lambda: next(clock))
+    monkeypatch.setattr(
+        "signal_api.domain_traces.time.perf_counter", lambda: next(clock)
+    )
     with span("test.partial_target"):
         pass
     with span("test.suggestion_target"):
@@ -61,11 +63,10 @@ def test_spans_measure_success_failure_and_hide_error_content(
 def test_observation_limits_bound_bursts_and_recover(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from signal_api import observation_limits
     from signal_api.observation_limits import ObservationLimiter
 
     now = [100.0]
-    monkeypatch.setattr(observation_limits.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr("signal_api.observation_limits.time.monotonic", lambda: now[0])
     limiter = ObservationLimiter(limit=2)
     assert limiter.allow("one")
     assert limiter.allow("one")
