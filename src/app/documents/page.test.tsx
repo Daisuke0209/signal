@@ -36,6 +36,18 @@ afterEach(() => {
 });
 
 describe("document management page", () => {
+  it("retries a failed document and shows its ready state", async () => {
+    const failed = { ...registered, processing_status: "failed", processing_error: "PDF extraction failed" };
+    vi.stubGlobal("fetch", vi.fn((input: string, init?: RequestInit) => {
+      if (input.endsWith("/auth/me")) return Promise.resolve(response(user));
+      if (input.includes("?organization_id=org-1")) return Promise.resolve(response([failed]));
+      if (input.endsWith("/documents/document-1/retry") && init?.method === "POST") return Promise.resolve(response({ ...registered, processing_status: "ready" }));
+      return Promise.reject(new Error("unexpected"));
+    }));
+    render(<DocumentsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "再解析" }));
+    expect(await screen.findByText("利用可能")).toBeDefined();
+  });
   it("shows registered documents and their parsing failure reason", async () => {
     vi.stubGlobal(
       "fetch",
