@@ -30,6 +30,131 @@ from signal_api.security import hash_password
 PASSWORD = "document-api-test-password"
 
 
+def test_document_file_and_page_are_authorized(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
+    organization_id, email = document_user
+    key = str(uuid.uuid4())
+    (storage / key).write_bytes(b"%PDF-1.4\n")
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="guide.pdf",
+            content_type="application/pdf",
+            byte_size=9,
+            storage_key=key,
+            processing_status="ready",
+        )
+        db.add(document)
+        db.flush()
+        db.add(DocumentPage(document_id=document.id, page_number=1, content="本文"))
+        db.commit()
+        document_id = document.id
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        file_response = client.get(f"/documents/{document_id}/file")
+        page_response = client.get(f"/documents/{document_id}/pages/1")
+        missing_page = client.get(f"/documents/{document_id}/pages/0")
+    assert (
+        file_response.status_code == 200
+        and file_response.headers["content-type"] == "application/pdf"
+    )
+    assert key not in file_response.text
+    assert (
+        page_response.json()["content"] == "本文"
+        and "storage" not in page_response.text
+    )
+    assert missing_page.status_code == 404
+
+
+def test_document_source_rejects_not_ready_and_missing_blob(
+    document_user: tuple[uuid.UUID, str],
+    storage: Path,
+) -> None:
+    organization_id, email = document_user
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        document = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="pending.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=str(uuid.uuid4()),
+        )
+        db.add(document)
+        db.commit()
+        document_id = document.id
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        assert client.get(f"/documents/{document_id}/file").status_code == 409
+        assert client.get(f"/documents/{document_id}/pages/1").status_code == 409
+
+    missing_key = str(uuid.uuid4())
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        missing = Document(
+            organization_id=organization_id,
+            uploaded_by_user_id=user_id,
+            filename="missing.pdf",
+            content_type="application/pdf",
+            byte_size=1,
+            storage_key=missing_key,
+            processing_status="ready",
+        )
+        db.add(missing)
+        db.commit()
+        missing_id = missing.id
+    assert not (storage / missing_key).exists()
+    with TestClient(app) as client:
+        client.post("/auth/login", json={"email": email, "password": PASSWORD})
+        response = client.get(f"/documents/{missing_id}/file")
+    assert response.status_code == 404
+    assert missing_key not in response.text
+
+
+def test_document_source_rejects_another_organizations_ready_document(
+    document_user: tuple[uuid.UUID, str], storage: Path
+) -> None:
+    _, email = document_user
+    key = str(uuid.uuid4())
+    (storage / key).write_bytes(b"%PDF-1.4\n")
+    with SessionLocal() as db:
+        user_id = db.scalar(select(User.id).where(User.email == email))
+        other = Organization(name="Other", slug=f"source-other-{uuid.uuid4()}")
+        db.add(other)
+        db.flush()
+        document = Document(
+            organization_id=other.id,
+            uploaded_by_user_id=user_id,
+            filename="other.pdf",
+            content_type="application/pdf",
+            byte_size=9,
+            storage_key=key,
+            processing_status="ready",
+        )
+        db.add(document)
+        db.flush()
+        db.add(DocumentPage(document_id=document.id, page_number=1, content="秘密"))
+        db.commit()
+        other_id, document_id = other.id, document.id
+    try:
+        with TestClient(app) as client:
+            client.post("/auth/login", json={"email": email, "password": PASSWORD})
+            file_response = client.get(f"/documents/{document_id}/file")
+            page_response = client.get(f"/documents/{document_id}/pages/1")
+        assert file_response.status_code == 403
+        assert page_response.status_code == 403
+        assert key not in file_response.text
+        assert "秘密" not in page_response.text
+    finally:
+        with SessionLocal() as db:
+            db.execute(delete(Organization).where(Organization.id == other_id))
+            db.commit()
+
+
 @pytest.fixture
 def document_user() -> Iterator[tuple[uuid.UUID, str]]:
     marker = uuid.uuid4()
