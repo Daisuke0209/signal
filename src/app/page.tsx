@@ -36,6 +36,7 @@ import {
   SuggestionState,
 } from "@/lib/suggestions-api";
 import styles from "./page.module.css";
+import { ConversationDocuments } from "@/components/conversation-documents";
 
 const DEMO_EMAIL = "demo@signal.local";
 
@@ -552,6 +553,7 @@ export default function Home() {
             </h1>
           </div>
           <div className={styles.audioControls}>
+            {conversation && <ConversationDocuments conversationId={conversation.id} organizationId={conversation.organization_id} ended={conversation.status === "ended"} />}
             <span
               className={styles.captureStatus}
               data-active={isCapturing}
