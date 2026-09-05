@@ -1246,3 +1246,22 @@ it("discards a delayed handoff response after switching conversations", async ()
   await waitFor(() => expect(screen.queryByText("古い回答")).toBeNull());
   expect(screen.queryByText("古い会話への回答")).toBeNull();
 });
+
+it("keeps the global handoff inbox after loading answers for the selected conversation", async () => {
+  const detail = { id: "conversation-answer", organization_id: "org-1", created_by_user_id: currentUser.id, status: "active", created_at: "2026-09-05T12:00:00Z", participants: [], messages: [] };
+  const inboxHandoff = { approval_request_id: "inbox-other", conversation_id: "other-conversation", target: "営業支援", summary: "別商談の未対応", evidence: [], requested_by_user_id: currentUser.id, created_at: detail.created_at, status: "open", assignee_user_id: null, claimed_at: null, response_content: null, responded_by_user_id: null, responded_at: null, resolved_at: null };
+  const answered = { ...inboxHandoff, approval_request_id: "answered", conversation_id: detail.id, summary: "現在の商談", status: "resolved", response_content: "回答内容", assignee_user_id: currentUser.id, responded_by_user_id: currentUser.id, responded_at: detail.created_at, resolved_at: detail.created_at };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] }))
+    .mockResolvedValueOnce(jsonResponse([{ id: detail.id, organization_id: detail.organization_id, status: detail.status, created_at: detail.created_at }]))
+    .mockResolvedValueOnce(jsonResponse(detail))
+    .mockResolvedValueOnce(jsonResponse([inboxHandoff]))
+    .mockResolvedValueOnce(jsonResponse([answered]));
+  vi.stubGlobal("fetch", fetchMock); render(<Home />);
+  await screen.findByText("進行中の商談");
+  fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+  expect(await screen.findByText("別商談の未対応")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "引継ぎ回答を確認" }));
+  expect(await screen.findByText("回答内容")).toBeDefined();
+  expect(screen.getByText("別商談の未対応")).toBeDefined();
+});

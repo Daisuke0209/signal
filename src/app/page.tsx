@@ -167,6 +167,7 @@ export default function Home() {
   const [handoffSummary, setHandoffSummary] = useState("");
   const approvalGeneration = useRef(0);
   const [handoffs, setHandoffs] = useState<Handoff[]>([]);
+  const [conversationHandoffs, setConversationHandoffs] = useState<Handoff[]>([]);
   const [handoffInboxOpen, setHandoffInboxOpen] = useState(false);
   const [handoffReply, setHandoffReply] = useState<Record<string, string>>({});
   const [handoffBusy, setHandoffBusy] = useState(false);
@@ -175,6 +176,7 @@ export default function Home() {
   function resetHandoffs() {
     handoffGeneration.current += 1;
     setHandoffs([]);
+    setConversationHandoffs([]);
     setHandoffInboxOpen(false);
     setHandoffReply({});
     setHandoffError("");
@@ -430,10 +432,7 @@ export default function Home() {
     try {
       const items = await listConversationHandoffs(conversationId);
       if (handoffGeneration.current === generation)
-        setHandoffs((current) => [
-          ...current.filter((item) => item.conversation_id !== conversationId),
-          ...items,
-        ]);
+        setConversationHandoffs(items);
     } catch {
       if (handoffGeneration.current === generation)
         setHandoffError(
@@ -1242,12 +1241,8 @@ export default function Home() {
                 引継ぎ回答を確認
               </button>
             )}
-            {handoffs
-              .filter(
-                (handoff) =>
-                  handoff.conversation_id === conversation?.id &&
-                  handoff.response_content,
-              )
+            {conversationHandoffs
+              .filter((handoff) => handoff.response_content)
               .map((handoff) => (
                 <section
                   className={styles.handoffAnswer}
