@@ -5,13 +5,17 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   addMessage,
+  ApprovalRequest,
   Conversation,
   ConversationDetail,
   createConversation,
+  createInternalHandoffApproval,
   CurrentUser,
+  decideApproval,
   endConversation,
   getConversation,
   getCurrentUser,
+  listApprovals,
   listConversations,
   login,
   logout,
@@ -65,6 +69,10 @@ function isOlderSuggestionRun(
     (candidate.generation === current.generation &&
       candidate.revision < current.revision)
   );
+}
+
+function approvalStatus(status: ApprovalRequest["status"]): string {
+  return { pending: "承認待ち", approved: "承認済み", rejected: "却下済み" }[status];
 }
 
 function SuggestionItems({ suggestions }: { suggestions: Suggestion[] }) {
@@ -127,6 +135,23 @@ export default function Home() {
   );
   const [suggestionConnectionError, setSuggestionConnectionError] =
     useState(false);
+  const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
+  const [approvalsOpen, setApprovalsOpen] = useState(false);
+  const [approvalsLoaded, setApprovalsLoaded] = useState(false);
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [approvalError, setApprovalError] = useState("");
+  const [handoffTarget, setHandoffTarget] = useState("営業支援");
+  const [handoffSummary, setHandoffSummary] = useState("");
+  const approvalGeneration = useRef(0);
+  function resetApprovals() {
+    approvalGeneration.current += 1;
+    setApprovals([]);
+    setApprovalsOpen(false);
+    setApprovalsLoaded(false);
+    setApprovalBusy(false);
+    setApprovalError("");
+    setHandoffSummary("");
+  }
   function stopCapture() {
     captureGeneration.current += 1;
     liveAbort.current?.abort();
@@ -292,6 +317,7 @@ export default function Home() {
       stopCapture();
       setSuggestionRun(null);
       setSuggestionConnectionError(false);
+      resetApprovals();
       setConversation(null);
       setItems([]);
       setUser(null);
@@ -354,6 +380,7 @@ export default function Home() {
     setShowManualInput(false);
     setSuggestionRun(null);
     setSuggestionConnectionError(false);
+    resetApprovals();
     setBusy(true);
     try {
       setConversation(await getConversation(id));
@@ -361,6 +388,69 @@ export default function Home() {
       setError("会話を読み込めませんでした。");
     } finally {
       setBusy(false);
+    }
+  }
+  async function loadApprovals() {
+    if (!conversation) return;
+    const generation = approvalGeneration.current;
+    const conversationId = conversation.id;
+    setApprovalBusy(true);
+    setApprovalError("");
+    try {
+      const loaded = await listApprovals(conversationId);
+      if (approvalGeneration.current !== generation) return;
+      setApprovals(loaded);
+      setApprovalsLoaded(true);
+    } catch {
+      if (approvalGeneration.current === generation)
+        setApprovalError("承認依頼を読み込めませんでした。もう一度お試しください。");
+    } finally {
+      if (approvalGeneration.current === generation) setApprovalBusy(false);
+    }
+  }
+  async function toggleApprovals() {
+    const nextOpen = !approvalsOpen;
+    setApprovalsOpen(nextOpen);
+    if (nextOpen && !approvalsLoaded) await loadApprovals();
+  }
+  async function requestHandoff(event: FormEvent) {
+    event.preventDefault();
+    if (!conversation || !handoffTarget.trim() || !handoffSummary.trim()) return;
+    const generation = approvalGeneration.current;
+    const conversationId = conversation.id;
+    setApprovalBusy(true);
+    setApprovalError("");
+    try {
+      const created = await createInternalHandoffApproval(conversationId, {
+        target: handoffTarget.trim(),
+        input: { summary: handoffSummary.trim() },
+        evidence: [],
+      });
+      if (approvalGeneration.current !== generation) return;
+      setApprovals((current) => [...current, created]);
+      setApprovalsLoaded(true);
+      setHandoffSummary("");
+    } catch {
+      if (approvalGeneration.current === generation)
+        setApprovalError("承認依頼を作成できませんでした。もう一度お試しください。");
+    } finally {
+      if (approvalGeneration.current === generation) setApprovalBusy(false);
+    }
+  }
+  async function decide(approvalId: string, decision: "approve" | "reject") {
+    const generation = approvalGeneration.current;
+    setApprovalBusy(true);
+    setApprovalError("");
+    try {
+      const decided = await decideApproval(approvalId, decision);
+      if (approvalGeneration.current !== generation) return;
+      setApprovals((current) => current.map((approval) =>
+        approval.id === decided.id ? decided : approval));
+    } catch {
+      if (approvalGeneration.current === generation)
+        setApprovalError("承認結果を保存できませんでした。もう一度お試しください。");
+    } finally {
+      if (approvalGeneration.current === generation) setApprovalBusy(false);
     }
   }
   async function start() {
@@ -375,6 +465,7 @@ export default function Home() {
       setShowManualInput(false);
       setSuggestionRun(null);
       setSuggestionConnectionError(false);
+      resetApprovals();
       setItems((old) => [created, ...old]);
       setConversation(await getConversation(created.id));
     } catch {
@@ -435,6 +526,7 @@ export default function Home() {
     try {
       await logout();
       stopCapture();
+      resetApprovals();
       setUser(null);
       setConversation(null);
       setItems([]);
@@ -756,6 +848,45 @@ export default function Home() {
               <SuggestionItems
                 suggestions={suggestionsFor(suggestionRun, "confirmation")}
               />
+            </section>
+            <section className={styles.approvalSection} aria-labelledby="approval-title">
+              <button className={styles.approvalToggle} aria-expanded={approvalsOpen}
+                aria-controls="approval-panel" onClick={() => void toggleApprovals()}
+                disabled={!conversation || approvalBusy}>
+                <span><span aria-hidden="true">✓</span><strong id="approval-title">承認が必要な操作</strong></span>
+                <span>{approvalsOpen ? "閉じる" : "確認する"}</span>
+              </button>
+              {approvalsOpen && <div id="approval-panel" className={styles.approvalPanel}>
+                {approvalError && <p className={styles.approvalError} role="alert">{approvalError}</p>}
+                <form className={styles.approvalForm} onSubmit={requestHandoff}>
+                  <p>社内引継ぎを作成する前に、内容と影響範囲を確認します。</p>
+                  <label>引継ぎ先<input value={handoffTarget} maxLength={255}
+                    onChange={(event) => setHandoffTarget(event.target.value)} /></label>
+                  <label>依頼内容<textarea value={handoffSummary} maxLength={4000}
+                    onChange={(event) => setHandoffSummary(event.target.value)}
+                    placeholder="依頼する内容を入力" /></label>
+                  <button disabled={approvalBusy || !handoffTarget.trim() || !handoffSummary.trim()}>承認依頼を作成</button>
+                </form>
+                {approvalsLoaded && !approvals.length && <p className={styles.approvalEmpty}>承認待ちの操作はありません。</p>}
+                <div className={styles.approvalList}>
+                  {approvals.map((approval) => <article className={styles.approvalItem} key={approval.id}>
+                    <div className={styles.approvalItemHead}><strong>社内引継ぎ</strong>
+                      <span data-status={approval.status}>{approvalStatus(approval.status)}</span></div>
+                    <dl><div><dt>引継ぎ先</dt><dd>{approval.target}</dd></div>
+                      <div><dt>依頼内容</dt><dd>{approval.input.summary}</dd></div></dl>
+                    {approval.evidence.length > 0 && <div className={styles.approvalEvidence}>
+                      <p>確認した資料</p>{approval.evidence.map((source) => <details
+                        key={`${source.document_id}:${source.page_number}`}>
+                        <summary>{source.document_name} · p.{source.page_number}</summary><p>{source.excerpt}</p>
+                      </details>)}
+                    </div>}
+                    {approval.status === "pending" && <div className={styles.approvalActions}>
+                      <button disabled={approvalBusy} onClick={() => void decide(approval.id, "approve")}>承認</button>
+                      <button disabled={approvalBusy} onClick={() => void decide(approval.id, "reject")}>却下</button>
+                    </div>}
+                  </article>)}
+                </div>
+              </div>}
             </section>
           </aside>
         </div>

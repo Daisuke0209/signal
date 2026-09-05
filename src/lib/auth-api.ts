@@ -119,3 +119,44 @@ export const addMessage = (
       body: JSON.stringify(message),
     },
   );
+
+
+export type ApprovalEvidence = {
+  document_id: string;
+  document_name: string;
+  page_number: number;
+  excerpt: string;
+};
+
+export type ApprovalRequest = {
+  id: string;
+  conversation_id: string;
+  operation: "internal_handoff";
+  target: string;
+  input: { summary: string };
+  evidence: ApprovalEvidence[];
+  status: "pending" | "approved" | "rejected";
+  requested_by_user_id: string;
+  decided_by_user_id: string | null;
+  decided_at: string | null;
+  created_at: string;
+};
+
+export const listApprovals = (conversationId: string) =>
+  json<ApprovalRequest[]>(`/conversations/${conversationId}/approvals`);
+export const createInternalHandoffApproval = (
+  conversationId: string,
+  request: Pick<ApprovalRequest, "target" | "input" | "evidence">,
+) =>
+  json<ApprovalRequest>(`/conversations/${conversationId}/approvals`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ operation: "internal_handoff", ...request }),
+  });
+export const decideApproval = (
+  approvalId: string,
+  decision: "approve" | "reject",
+) =>
+  json<ApprovalRequest>(`/conversations/approvals/${approvalId}/${decision}`, {
+    method: "POST",
+  });
