@@ -39,9 +39,11 @@ export default function DocumentsPage() {
   const [retrying, setRetrying] = useState<string | null>(null);
   const selectedOrganizationId = useRef("");
   const listRequestGeneration = useRef(0);
+  const documentOperationGeneration = useRef(0);
   const mounted = useRef(false);
 
   function selectOrganization(nextOrganizationId: string) {
+    documentOperationGeneration.current += 1;
     selectedOrganizationId.current = nextOrganizationId;
     setOrganizationId(nextOrganizationId);
     setDocuments([]);
@@ -138,21 +140,26 @@ export default function DocumentsPage() {
   async function retry(document: Document) {
     if (retrying || document.processing_status === "processing") return;
     const retryOrganizationId = selectedOrganizationId.current;
+    const retryGeneration = documentOperationGeneration.current;
+    const isCurrentRetry = () =>
+      mounted.current &&
+      selectedOrganizationId.current === retryOrganizationId &&
+      documentOperationGeneration.current === retryGeneration;
     setRetrying(document.id);
     setError("");
     try {
       const next = await retryDocument(document.id);
-      if (selectedOrganizationId.current === retryOrganizationId) {
+      if (isCurrentRetry()) {
         setDocuments((items) =>
           items.map((item) => (item.id === next.id ? next : item)),
         );
       }
     } catch {
-      if (selectedOrganizationId.current === retryOrganizationId) {
+      if (isCurrentRetry()) {
         setError("資料を再解析できませんでした。もう一度お試しください。");
       }
     } finally {
-      if (selectedOrganizationId.current === retryOrganizationId) {
+      if (isCurrentRetry()) {
         setRetrying(null);
       }
     }

@@ -167,15 +167,70 @@ describe("document management page", () => {
 
     render(<DocumentsPage />);
     fireEvent.click(await screen.findByRole("button", { name: "再解析" }));
-    fireEvent.change(screen.getByLabelText("組織"), { target: { value: "org-2" } });
+    const organization = screen.getByLabelText("組織");
+    fireEvent.change(organization, { target: { value: "org-2" } });
     expect(await screen.findByText("開発部資料.pdf")).toBeDefined();
+    fireEvent.change(organization, { target: { value: "org-1" } });
+    expect(await screen.findByText("料金表.pdf")).toBeDefined();
 
     rejectRetry(new Error("network failed"));
     await Promise.resolve();
     await waitFor(() => {
-      expect(screen.getByText("開発部資料.pdf")).toBeDefined();
+      expect(screen.getByText("料金表.pdf")).toBeDefined();
       expect(screen.queryByRole("alert")).toBeNull();
     });
+  });
+
+  it("does not let an earlier retry overwrite a newer retry after returning to an organization", async () => {
+    const multipleOrganizations = {
+      ...user,
+      organizations: [
+        ...user.organizations,
+        { id: "org-2", name: "開発部", slug: "engineering", role: "member" },
+      ],
+    };
+    const firstDocument = { ...registered, processing_status: "failed" };
+    const secondDocument = {
+      ...registered,
+      id: "document-2",
+      organization_id: "org-2",
+      filename: "開発部資料.pdf",
+      processing_status: "failed",
+    };
+    let resolveFirst: (value: Response) => void = () => undefined;
+    let rejectSecond: (reason?: unknown) => void = () => undefined;
+    const firstRetry = new Promise<Response>((resolve) => { resolveFirst = resolve; });
+    const secondRetry = new Promise<Response>((_, reject) => { rejectSecond = reject; });
+    let retryCalls = 0;
+    vi.stubGlobal("fetch", vi.fn((input: string, init?: RequestInit) => {
+      if (input.endsWith("/auth/me")) return Promise.resolve(response(multipleOrganizations));
+      if (input.includes("?organization_id=org-1")) return Promise.resolve(response([firstDocument]));
+      if (input.includes("?organization_id=org-2")) return Promise.resolve(response([secondDocument]));
+      if (input.endsWith("/documents/document-1/retry") && init?.method === "POST") {
+        retryCalls += 1;
+        return retryCalls === 1 ? firstRetry : secondRetry;
+      }
+      return Promise.reject(new Error("unexpected"));
+    }));
+
+    render(<DocumentsPage />);
+    fireEvent.click(await screen.findByRole("button", { name: "再解析" }));
+    const organization = screen.getByLabelText("組織");
+    fireEvent.change(organization, { target: { value: "org-2" } });
+    expect(await screen.findByText("開発部資料.pdf")).toBeDefined();
+    fireEvent.change(organization, { target: { value: "org-1" } });
+    expect(await screen.findByText("料金表.pdf")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "再解析" }));
+    expect((screen.getByRole("button", { name: "再解析中…" }) as HTMLButtonElement).disabled).toBe(true);
+
+    resolveFirst(response({ ...registered, processing_status: "ready" }));
+    await Promise.resolve();
+    expect((screen.getByRole("button", { name: "再解析中…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("解析に失敗")).toBeDefined();
+
+    rejectSecond(new Error("second failure"));
+    expect(await screen.findByRole("alert")).toBeDefined();
+    expect((screen.getByRole("button", { name: "再解析" }) as HTMLButtonElement).disabled).toBe(false);
   });
   it("shows registered documents and their parsing failure reason", async () => {
     vi.stubGlobal(
