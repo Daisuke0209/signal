@@ -36,9 +36,11 @@ export default function Home() {
   const capture = useRef<Awaited<ReturnType<typeof startAudioCapture>> | null>(
     null,
   );
+  const captureGeneration = useRef(0);
   const [captureState, setCaptureState] = useState("停止中");
   const [isCapturing, setIsCapturing] = useState(false);
   function stopCapture() {
+    captureGeneration.current += 1;
     stopStream(capture.current?.displayStream ?? null);
     stopStream(capture.current?.microphoneStream ?? null);
     capture.current = null;
@@ -46,10 +48,19 @@ export default function Home() {
     setCaptureState("停止中");
   }
   async function beginCapture() {
+    if (busy || isCapturing) return;
+    const generation = captureGeneration.current + 1;
+    captureGeneration.current = generation;
     setError("");
     setBusy(true);
     try {
-      capture.current = await startAudioCapture();
+      const nextCapture = await startAudioCapture();
+      if (captureGeneration.current !== generation) {
+        stopStream(nextCapture.displayStream);
+        stopStream(nextCapture.microphoneStream);
+        return;
+      }
+      capture.current = nextCapture;
       setIsCapturing(true);
       capture.current.displayStream
         .getAudioTracks()[0]
@@ -119,6 +130,7 @@ export default function Home() {
     }
   }
   async function select(id: string) {
+    stopCapture();
     setBusy(true);
     try {
       setConversation(await getConversation(id));
