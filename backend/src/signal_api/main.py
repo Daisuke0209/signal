@@ -8,12 +8,14 @@ from sqlalchemy.orm import Session
 
 from signal_api.auth import router as auth_router
 from signal_api.config import get_settings
+from signal_api.conversations import router as conversations_router
 from signal_api.database import get_db_session
 
 settings = get_settings()
 
 app = FastAPI(title="Signal API")
 app.include_router(auth_router)
+app.include_router(conversations_router)
 
 app.add_middleware(
     CORSMiddleware,
