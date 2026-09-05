@@ -15,6 +15,7 @@ from signal_api.observability import (
     RequestLoggingMiddleware,
     configure_request_logging,
 )
+from signal_api.transcription_routes import router as transcription_router
 
 settings = get_settings()
 
@@ -24,6 +25,7 @@ app.add_middleware(RequestLoggingMiddleware)
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(documents_router)
+app.include_router(transcription_router)
 
 app.add_middleware(
     CORSMiddleware,

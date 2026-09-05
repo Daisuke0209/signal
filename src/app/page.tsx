@@ -18,6 +18,7 @@ import {
   startAudioCapture,
   stopStream,
 } from "@/lib/audio-capture";
+import { LiveTranscription, TranscriptEvent, startLiveTranscription, transcriptionError } from "@/lib/live-transcription";
 import styles from "./page.module.css";
 
 const DEMO_EMAIL = "demo@signal.local";
@@ -37,11 +38,20 @@ export default function Home() {
     null,
   );
   const captureGeneration = useRef(0);
+  const live = useRef<LiveTranscription | null>(null);
+  const liveAbort = useRef<AbortController | null>(null);
+  const [partials, setPartials] = useState<Record<string, TranscriptEvent>>({});
+  const [isStopping, setIsStopping] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
   const [captureState, setCaptureState] = useState("停止中");
   const [isCapturing, setIsCapturing] = useState(false);
   function stopCapture() {
     captureGeneration.current += 1;
+    liveAbort.current?.abort();
+    live.current?.abort();
+    live.current = null;
+    setPartials({});
+    setIsStopping(false);
     stopStream(capture.current?.displayStream ?? null);
     stopStream(capture.current?.microphoneStream ?? null);
     capture.current = null;
@@ -49,11 +59,13 @@ export default function Home() {
     setCaptureState("停止中");
   }
   async function beginCapture() {
-    if (busy || isCapturing) return;
+    if (busy || isCapturing || !conversation || conversation.status !== "active") return;
     const generation = captureGeneration.current + 1;
     captureGeneration.current = generation;
     setError("");
     setBusy(true);
+    const aborter = new AbortController();
+    liveAbort.current = aborter;
     try {
       const nextCapture = await startAudioCapture();
       if (captureGeneration.current !== generation) {
@@ -75,11 +87,39 @@ export default function Home() {
           stopCapture();
           setError("マイク音声が終了しました。");
         });
-      setCaptureState("共有音声・マイクを取得中");
+      setCaptureState("文字起こしに接続中…");
+      const connection = await startLiveTranscription(nextCapture, conversation.id, aborter.signal,
+        (update) => {
+          if (captureGeneration.current !== generation) return;
+          const key = `${update.source}:${update.item_id}`;
+          setPartials((old) => {
+            const next = { ...old };
+            if (update.type === "final") delete next[key];
+            else next[key] = update;
+            return next;
+          });
+          if (update.type === "final" && update.message) {
+            const message = update.message;
+            setConversation((old) => old?.id === conversation.id ? {
+              ...old, messages: [...old.messages.filter((m) => m.id !== message.id), message]
+                .sort((a, b) => a.sequence_number - b.sequence_number),
+            } : old);
+          }
+        },
+        (message) => {
+          if (captureGeneration.current !== generation) return;
+          stopCapture();
+          setError(message);
+        });
+      if (captureGeneration.current !== generation) { connection.abort(); return; }
+      live.current = connection;
+      setCaptureState("文字起こし中");
     } catch (captureError) {
+      if (captureGeneration.current !== generation) return;
+      const connecting = capture.current !== null;
       const reason = captureFailure(captureError);
       setError(
-        reason === "missing-tab-audio"
+        connecting ? transcriptionError(captureError instanceof Error ? captureError.message : "") : reason === "missing-tab-audio"
           ? "共有したタブに音声がありません。タブ音声を共有してください。"
           : reason === "missing-microphone-audio"
             ? "マイクから音声を取得できませんでした。マイクを確認してください。"
@@ -90,6 +130,19 @@ export default function Home() {
       stopCapture();
     } finally {
       setBusy(false);
+    }
+  }
+  async function finishCapture() {
+    if (!live.current || isStopping) return;
+    const generation = captureGeneration.current;
+    setIsStopping(true);
+    setCaptureState("最後の発言を保存中…");
+    try {
+      await live.current.stop();
+    } catch {
+      if (captureGeneration.current === generation) setError(transcriptionError("stop_failed"));
+    } finally {
+      if (captureGeneration.current === generation) stopCapture();
     }
   }
   useEffect(() => () => stopCapture(), []);
@@ -309,7 +362,7 @@ export default function Home() {
               {captureState}
             </span>
             {isCapturing ? (
-              <button className={styles.stopButton} onClick={stopCapture}>
+              <button className={styles.stopButton} disabled={busy || isStopping} onClick={() => void finishCapture()}>
                 音声取得を停止
               </button>
             ) : (
@@ -368,7 +421,17 @@ export default function Home() {
                   <p>{message.content}</p>
                 </article>
               ))}
-              {!conversation?.messages.length && (
+               {Object.entries(partials).map(([key, update]) => (
+                <article className={styles.message} data-speaker={update.side} data-partial="true" key={key}>
+                  <div className={styles.speaker}>
+                    <span aria-hidden="true" />
+                    {update.source === "microphone" ? "自分（マイク）" : "通話相手（共有音声）"}
+                    <small>聞き取り中</small>
+                  </div>
+                  <p>{update.text || "…"}</p>
+                </article>
+              ))}
+               {!conversation?.messages.length && !Object.keys(partials).length && (
                 <div className={styles.transcriptEmpty}>
                   <span className={styles.soundMark} aria-hidden="true">
                     <i />

@@ -5,8 +5,13 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const liveMocks = vi.hoisted(() => ({ start: vi.fn(), abort: vi.fn(), stop: vi.fn() }));
+vi.mock("@/lib/live-transcription", () => ({
+  startLiveTranscription: liveMocks.start,
+  transcriptionError: () => "文字起こしが中断しました。",
+}));
 const audioMocks = vi.hoisted(() => ({ start: vi.fn() }));
 vi.mock("@/lib/audio-capture", () => ({
   startAudioCapture: audioMocks.start,
@@ -47,6 +52,10 @@ function jsonResponse(value: unknown): Response {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+beforeEach(() => {
+  liveMocks.start.mockResolvedValue({ abort: liveMocks.abort, stop: liveMocks.stop });
+});
 
 afterEach(() => {
   cleanup();
@@ -116,7 +125,7 @@ describe("authentication page", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "Meet音声とマイクを取得" }),
     );
-    await screen.findByText("共有音声・マイクを取得中");
+    await screen.findByText("文字起こし中");
     listeners.get("ended")?.();
     expect(await screen.findByText("共有音声が終了しました。")).toBeDefined();
     expect(screen.getByText("停止中")).toBeDefined();
