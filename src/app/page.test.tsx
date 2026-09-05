@@ -289,7 +289,7 @@ describe("authentication page", () => {
     await screen.findByText("Demo User");
     fireEvent.click(screen.getByRole("button", { name: "新規作成" }));
 
-    await screen.findByText("最初の発言を追加してください。");
+    await screen.findByText("会話を受け取る準備ができました");
     expect(fetchMock).toHaveBeenNthCalledWith(
       3,
       "http://localhost:8000/conversations",
@@ -342,7 +342,11 @@ describe("authentication page", () => {
     vi.stubGlobal("fetch", fetchMock);
     render(<Home />);
 
-    await screen.findByText("最初の発言を追加してください。");
+    await screen.findByText("会話を受け取る準備ができました");
+    expect(screen.queryByLabelText("発言")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "音声が使えないときは" }),
+    );
     fireEvent.change(screen.getByLabelText("話者"), {
       target: { value: "customer" },
     });
