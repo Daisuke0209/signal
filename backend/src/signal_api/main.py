@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated
@@ -24,6 +25,13 @@ from signal_api.suggestion_runtime import SuggestionRuntime, create_agent
 from signal_api.suggestion_stream import router as suggestion_stream_router
 from signal_api.suggestions import router as suggestions_router
 from signal_api.trace_routes import router as trace_router
+from signal_api.summaries import (
+    SummaryWorker,
+    recover_summaries,
+)
+from signal_api.summaries import (
+    router as summaries_router,
+)
 from signal_api.transcription_routes import router as transcription_router
 
 settings = get_settings()
@@ -34,6 +42,8 @@ configure_domain_logging()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.summary_worker = SummaryWorker()
+    await asyncio.to_thread(recover_summaries)
     if not get_settings().suggestions_enabled:
         yield
         return
@@ -58,6 +68,7 @@ app.include_router(suggestions_router)
 app.include_router(suggestion_stream_router)
 app.include_router(transcription_router)
 app.include_router(trace_router)
+app.include_router(summaries_router)
 
 app.add_middleware(
     CORSMiddleware,
