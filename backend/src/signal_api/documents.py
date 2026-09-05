@@ -79,7 +79,7 @@ def require_membership(
 
 
 @router.post("", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
-async def create_document(
+def create_document(
     organization_id: Annotated[uuid.UUID, Form()],
     file: Annotated[UploadFile, File()],
     db: DatabaseSession,
@@ -101,7 +101,7 @@ async def create_document(
         raise HTTPException(status_code=422, detail="Document limit reached")
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=422, detail="Only PDF files are accepted")
-    contents = await file.read(settings.document_max_size_bytes + 1)
+    contents = file.file.read(settings.document_max_size_bytes + 1)
     if not contents:
         raise HTTPException(status_code=422, detail="Document must not be empty")
     if len(contents) > settings.document_max_size_bytes:
