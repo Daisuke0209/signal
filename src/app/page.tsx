@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   addMessage,
   Conversation,
@@ -13,6 +13,11 @@ import {
   login,
   logout,
 } from "@/lib/auth-api";
+import {
+  captureFailure,
+  startAudioCapture,
+  stopStream,
+} from "@/lib/audio-capture";
 import styles from "./page.module.css";
 
 const DEMO_EMAIL = "demo@signal.local";
@@ -28,6 +33,65 @@ export default function Home() {
     [conversation, setConversation] = useState<ConversationDetail | null>(null),
     [side, setSide] = useState<"customer" | "sales_rep">("sales_rep"),
     [content, setContent] = useState("");
+  const capture = useRef<Awaited<ReturnType<typeof startAudioCapture>> | null>(
+    null,
+  );
+  const captureGeneration = useRef(0);
+  const [captureState, setCaptureState] = useState("停止中");
+  const [isCapturing, setIsCapturing] = useState(false);
+  function stopCapture() {
+    captureGeneration.current += 1;
+    stopStream(capture.current?.displayStream ?? null);
+    stopStream(capture.current?.microphoneStream ?? null);
+    capture.current = null;
+    setIsCapturing(false);
+    setCaptureState("停止中");
+  }
+  async function beginCapture() {
+    if (busy || isCapturing) return;
+    const generation = captureGeneration.current + 1;
+    captureGeneration.current = generation;
+    setError("");
+    setBusy(true);
+    try {
+      const nextCapture = await startAudioCapture();
+      if (captureGeneration.current !== generation) {
+        stopStream(nextCapture.displayStream);
+        stopStream(nextCapture.microphoneStream);
+        return;
+      }
+      capture.current = nextCapture;
+      setIsCapturing(true);
+      capture.current.displayStream
+        .getAudioTracks()[0]
+        ?.addEventListener("ended", () => {
+          stopCapture();
+          setError("共有音声が終了しました。");
+        });
+      capture.current.microphoneStream
+        .getAudioTracks()[0]
+        ?.addEventListener("ended", () => {
+          stopCapture();
+          setError("マイク音声が終了しました。");
+        });
+      setCaptureState("共有音声・マイクを取得中");
+    } catch (captureError) {
+      const reason = captureFailure(captureError);
+      setError(
+        reason === "missing-tab-audio"
+          ? "共有したタブに音声がありません。タブ音声を共有してください。"
+          : reason === "missing-microphone-audio"
+            ? "マイクから音声を取得できませんでした。マイクを確認してください。"
+            : reason === "permission-denied"
+              ? "共有またはマイクの権限が許可されませんでした。"
+              : "音声共有がキャンセルされました。",
+      );
+      stopCapture();
+    } finally {
+      setBusy(false);
+    }
+  }
+  useEffect(() => () => stopCapture(), []);
   async function load() {
     const conversations = await listConversations();
     setItems(conversations);
@@ -66,6 +130,7 @@ export default function Home() {
     }
   }
   async function select(id: string) {
+    stopCapture();
     setBusy(true);
     try {
       setConversation(await getConversation(id));
@@ -114,6 +179,7 @@ export default function Home() {
     setError("");
     try {
       await logout();
+      stopCapture();
       setUser(null);
       setConversation(null);
       setItems([]);
@@ -241,6 +307,20 @@ export default function Home() {
         </section>
         <aside className={styles.assist}>
           <h2>営業支援</h2>
+          <section>
+            <h3>音声入力</h3>
+            <p>{captureState}</p>
+            {isCapturing ? (
+              <button onClick={stopCapture}>音声取得を停止</button>
+            ) : (
+              <button
+                onClick={() => void beginCapture()}
+                disabled={!conversation || busy}
+              >
+                Meet音声とマイクを取得
+              </button>
+            )}
+          </section>
           {[
             ["次に聞くこと", "会話が始まると提案します"],
             ["返答例", "会話の文脈から作成します"],
