@@ -301,6 +301,23 @@ class ConversationMessage(Base):
     )
 
 
+class ConversationDocument(Base):
+    __tablename__ = "conversation_documents"
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("documents.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class TranscriptionSession(Base):
     __tablename__ = "transcription_sessions"
 

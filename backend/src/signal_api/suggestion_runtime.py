@@ -17,6 +17,7 @@ from signal_api.documents import search_document_pages
 from signal_api.domain_traces import span, trace, trace_context
 from signal_api.models import (
     Conversation,
+    ConversationDocument,
     ConversationMessage,
     ConversationParticipant,
     ConversationStatus,
@@ -122,7 +123,7 @@ class SuggestionRuntime:
 
     def prepare(
         self, db: Session, cid: uuid.UUID, rid: uuid.UUID
-    ) -> tuple[str, uuid.UUID, bool] | None:
+    ) -> tuple[str, uuid.UUID, set[uuid.UUID]] | None:
         conversation = db.scalar(
             select(Conversation).where(Conversation.id == cid).with_for_update()
         )
@@ -161,9 +162,12 @@ class SuggestionRuntime:
             .order_by(ConversationMessage.sequence_number.desc())
             .limit(12)
         ).all()
-        available = bool(
-            db.scalar(
-                select(func.count(Document.id)).where(
+        selected_ids = set(
+            db.scalars(
+                select(Document.id)
+                .join(ConversationDocument)
+                .where(
+                    ConversationDocument.conversation_id == conversation.id,
                     Document.organization_id == conversation.organization_id,
                     Document.processing_status == DocumentProcessingStatus.READY,
                 )
@@ -171,7 +175,7 @@ class SuggestionRuntime:
         )
         context = json.dumps(
             {
-                "documents": "available" if available else "no_searchable_documents",
+                "documents": "available" if selected_ids else "no_searchable_documents",
                 "conversation": [
                     {"side": participant.side.value, "text": message.content[:1500]}
                     for message, participant in reversed(rows)
@@ -179,7 +183,7 @@ class SuggestionRuntime:
             },
             ensure_ascii=False,
         )
-        return context, conversation.organization_id, available
+        return context, conversation.organization_id, selected_ids
 
     def phase(
         self, db: Session, cid: uuid.UUID, rid: uuid.UUID, phase: AgentPhase
@@ -279,7 +283,7 @@ class SuggestionRuntime:
                 await self.publish(cid)
                 if prepared is None:
                     return
-                context, org_id, available = prepared
+                context, org_id, selected_ids = prepared
 
                 async def report(phase: AgentPhase) -> None:
                     await asyncio.to_thread(
@@ -292,7 +296,7 @@ class SuggestionRuntime:
                         return [
                             Evidence.model_validate(item.model_dump(exclude={"score"}))
                             for item in search_document_pages(
-                                db, org_id, query, limit=5
+                                db, org_id, query, document_ids=selected_ids, limit=5
                             )
                         ]
 
@@ -303,7 +307,7 @@ class SuggestionRuntime:
 
                 with span("suggestion.generate"):
                     output, evidence = await self.agent.generate(
-                        context, search if available else None, report
+                        context, search if selected_ids else None, report
                     )
                 with span("suggestion.persist"):
                     await asyncio.to_thread(
