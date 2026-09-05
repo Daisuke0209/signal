@@ -14,6 +14,7 @@ from signal_api.database import SessionLocal
 from signal_api.main import app
 from signal_api.models import (
     Conversation,
+    ConversationParticipantSide,
     Membership,
     Organization,
     Suggestion,
@@ -33,6 +34,8 @@ from signal_api.suggestion_stream import authorized_snapshot, stream_suggestions
 from signal_api.suggestions import queue_suggestion_run, start_suggestion_run
 from signal_api.transcription import TranscriptUpdate
 from signal_api.transcription_store import open_session, persist_final
+
+type Actor = tuple[TestClient, uuid.UUID, uuid.UUID, uuid.UUID, str]
 
 
 @pytest.fixture
@@ -83,7 +86,7 @@ def message(
 
 
 def test_final_message_automatically_pushes_ordered_states_and_persists_result(
-    actor: tuple, monkeypatch: pytest.MonkeyPatch
+    actor: Actor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     client, cid, _, _, _ = actor
     monkeypatch.setattr(get_settings(), "suggestions_enabled", True)
@@ -152,7 +155,7 @@ def test_final_message_automatically_pushes_ordered_states_and_persists_result(
     asyncio.run(scenario())
 
 
-def test_newer_input_prevents_old_generation_result_publication(actor: tuple) -> None:
+def test_newer_input_prevents_old_generation_result_publication(actor: Actor) -> None:
     client, cid, _, _, _ = actor
     message(client, cid)
     with SessionLocal() as db:
@@ -180,7 +183,9 @@ def test_newer_input_prevents_old_generation_result_publication(actor: tuple) ->
 
     asyncio.run(scenario())
     with SessionLocal() as db:
-        assert db.get(SuggestionRun, rid).status == SuggestionRunStatus.FAILED
+        run = db.get(SuggestionRun, rid)
+        assert run is not None
+        assert run.status == SuggestionRunStatus.FAILED
         assert (
             db.scalar(select(func.count(Suggestion.id)).where(Suggestion.run_id == rid))
             == 0
@@ -191,7 +196,7 @@ def test_newer_input_prevents_old_generation_result_publication(actor: tuple) ->
 
 
 def test_duplicate_transcript_final_enqueues_only_once(
-    actor: tuple, monkeypatch: pytest.MonkeyPatch
+    actor: Actor, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _, cid, _, _, token = actor
     monkeypatch.setattr(get_settings(), "suggestions_enabled", True)
@@ -201,7 +206,7 @@ def test_duplicate_transcript_final_enqueues_only_once(
         item_id="test-final",
         text="こんにちは",
         final=True,
-        side="customer",
+        side=ConversationParticipantSide.CUSTOMER,
     )
     first = persist_final(token, sid, update)
     assert persist_final(token, sid, update) == first
@@ -217,14 +222,15 @@ def test_duplicate_transcript_final_enqueues_only_once(
 
 
 def test_sse_initial_snapshot_and_membership_revocation_close_stream(
-    actor: tuple,
+    actor: Actor,
 ) -> None:
     _, cid, oid, uid, token = actor
 
     async def scenario() -> None:
         response = await stream_suggestions(cid, token)
-        iterator = response.body_iterator
+        iterator = aiter(response.body_iterator)
         initial = await anext(iterator)
+        assert isinstance(initial, str)
         assert "event: suggestion_state" in initial
         assert str(cid) in initial
         with SessionLocal() as db:
@@ -236,6 +242,7 @@ def test_sse_initial_snapshot_and_membership_revocation_close_stream(
             db.commit()
         events.publish(cid, {"conversation_id": str(cid), "latest_run": None})
         revoked = await anext(iterator)
+        assert isinstance(revoked, str)
         assert "access_revoked" in revoked
         with pytest.raises(StopAsyncIteration):
             await anext(iterator)
