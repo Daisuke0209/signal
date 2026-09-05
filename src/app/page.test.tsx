@@ -936,3 +936,149 @@ describe("authentication page", () => {
     });
   });
 });
+describe("approval requests", () => {
+  const detail = {
+    id: "conversation-approval",
+    organization_id: "org-1",
+    created_by_user_id: currentUser.id,
+    status: "active",
+    created_at: "2026-09-05T12:00:00Z",
+    participants: [],
+    messages: [],
+  };
+  const user = {
+    ...currentUser,
+    organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }],
+  };
+
+  it("shows an approval's impact and approves it", async () => {
+    const pending = {
+      id: "approval-1",
+      conversation_id: detail.id,
+      operation: "internal_handoff",
+      target: "営業支援",
+      input: { summary: "技術要件を確認する" },
+      evidence: [
+        {
+          document_id: "document-1",
+          document_name: "製品資料",
+          page_number: 3,
+          excerpt: "専門チームが導入を支援します。",
+        },
+      ],
+      status: "pending",
+      requested_by_user_id: currentUser.id,
+      decided_by_user_id: null,
+      decided_at: null,
+      created_at: detail.created_at,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(user))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: detail.id,
+            organization_id: detail.organization_id,
+            status: detail.status,
+            created_at: detail.created_at,
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(jsonResponse(detail))
+      .mockResolvedValueOnce(jsonResponse([pending]))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          ...pending,
+          status: "approved",
+          decided_by_user_id: currentUser.id,
+          decided_at: detail.created_at,
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Home />);
+
+    await screen.findByText("進行中の商談");
+    fireEvent.click(
+      screen.getByRole("button", { name: /承認が必要な操作.*確認する/ }),
+    );
+    expect(await screen.findByText("技術要件を確認する")).toBeDefined();
+    expect(screen.getByText("製品資料 · p.3")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "承認" }));
+    expect(await screen.findByText("承認済み")).toBeDefined();
+    expect(fetchMock).toHaveBeenLastCalledWith(
+      "http://localhost:8000/conversations/approvals/approval-1/approve",
+      expect.objectContaining({ method: "POST", credentials: "include" }),
+    );
+  });
+
+  it("creates an internal handoff approval and keeps an API failure visible", async () => {
+    const created = {
+      id: "approval-2",
+      conversation_id: detail.id,
+      operation: "internal_handoff",
+      target: "営業支援",
+      input: { summary: "導入日程を相談する" },
+      evidence: [],
+      status: "pending",
+      requested_by_user_id: currentUser.id,
+      decided_by_user_id: null,
+      decided_at: null,
+      created_at: detail.created_at,
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(user))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: detail.id,
+            organization_id: detail.organization_id,
+            status: detail.status,
+            created_at: detail.created_at,
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(jsonResponse(detail))
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(jsonResponse(created))
+      .mockResolvedValueOnce(new Response(null, { status: 500 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<Home />);
+
+    await screen.findByText("進行中の商談");
+    fireEvent.click(
+      screen.getByRole("button", { name: /承認が必要な操作.*確認する/ }),
+    );
+    await screen.findByText("承認待ちの操作はありません。");
+    fireEvent.change(screen.getByLabelText("依頼内容"), {
+      target: { value: "導入日程を相談する" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "承認依頼を作成" }));
+
+    expect(await screen.findByText("導入日程を相談する")).toBeDefined();
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "http://localhost:8000/conversations/conversation-approval/approvals",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          operation: "internal_handoff",
+          target: "営業支援",
+          input: { summary: "導入日程を相談する" },
+          evidence: [],
+        }),
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "却下" }));
+    expect(
+      await screen.findByText(
+        "承認結果を保存できませんでした。もう一度お試しください。",
+      ),
+    ).toBeDefined();
+  });
+});
