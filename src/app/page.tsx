@@ -230,6 +230,7 @@ export default function Home() {
     if (!user || !conversationId) return;
 
     let active = true;
+    let revalidating = false;
     const applyState = (state: SuggestionState) => {
       if (!active || state.conversation_id !== conversationId) return;
       setSuggestionConnectionError(false);
@@ -241,6 +242,15 @@ export default function Home() {
     };
     const handleConnectionError = () => {
       if (active) setSuggestionConnectionError(true);
+      if (!active || revalidating) return;
+      revalidating = true;
+      void getCurrentUser()
+        .then((currentUser) => {
+          if (active && currentUser === null) handleAccessRevoked();
+        })
+        .catch(() => {
+          // A transport failure keeps the disconnected state visible.
+        });
     };
     const handleAccessRevoked = () => {
       if (!active) return;
