@@ -1195,3 +1195,29 @@ describe("handoff inbox", () => {
     await waitFor(() => expect(screen.queryByText("技術要件を確認する")).toBeNull());
   });
 });
+
+it("discards delayed handoff claim and response results after switching conversations", async () => {
+  let resolveClaim: ((response: Response) => void) | undefined;
+  let resolveResponse: ((response: Response) => void) | undefined;
+  const first = { id: "handoff-switch-1", organization_id: "org-1", status: "active", created_at: "2026-09-05T12:00:00Z" };
+  const second = { ...first, id: "handoff-switch-2" };
+  const detail = (conversation: typeof first) => ({ ...conversation, created_by_user_id: currentUser.id, participants: [], messages: [] });
+  const handoff = { approval_request_id: "handoff-switch", conversation_id: first.id, target: "営業支援", summary: "古い引継ぎ", evidence: [], requested_by_user_id: currentUser.id, created_at: first.created_at, status: "open", assignee_user_id: null, claimed_at: null, response_content: null, responded_by_user_id: null, responded_at: null, resolved_at: null };
+  const fetchMock = vi.fn()
+    .mockResolvedValueOnce(jsonResponse({ ...currentUser, organizations: [{ id: "org-1", name: "Demo", slug: "demo", role: "admin" }] }))
+    .mockResolvedValueOnce(jsonResponse([first, second]))
+    .mockResolvedValueOnce(jsonResponse(detail(first)))
+    .mockResolvedValueOnce(jsonResponse([handoff]))
+    .mockImplementationOnce(() => new Promise<Response>((resolve) => { resolveClaim = resolve; }))
+    .mockResolvedValueOnce(jsonResponse(detail(second)));
+  vi.stubGlobal("fetch", fetchMock); render(<Home />);
+  await screen.findByText("進行中の商談");
+  fireEvent.click(screen.getByRole("button", { name: /引継ぎ受信箱/ }));
+  expect(await screen.findByText("古い引継ぎ")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "受け取る" }));
+  fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+  resolveClaim?.(jsonResponse({ ...handoff, status: "claimed", assignee_user_id: currentUser.id, claimed_at: first.created_at }));
+  await waitFor(() => expect(screen.queryByText("古い引継ぎ")).toBeNull());
+  expect(screen.queryByRole("button", { name: "回答して解決" })).toBeNull();
+  expect(resolveResponse).toBeUndefined();
+});
