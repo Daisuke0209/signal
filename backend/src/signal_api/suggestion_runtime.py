@@ -30,6 +30,7 @@ from signal_api.models import (
     SuggestionKind,
     SuggestionRun,
     SuggestionRunStatus,
+    confirmation_item_key,
 )
 from signal_api.suggestion_agent import (
     AgentFailure,
@@ -191,7 +192,7 @@ class SuggestionRuntime:
                     {
                         "id": str(item.id),
                         "content": item.content,
-                        "status": item.status.value,
+                        "status": item.status,
                     }
                     for item in db.scalars(
                         select(ConversationConfirmationItem).where(
@@ -265,7 +266,7 @@ class SuggestionRuntime:
                 SuggestionKind.QUESTION.value,
             ):
                 continue
-            normalized_content = " ".join(suggestion.content.casefold().split())
+            normalized_content = confirmation_item_key(suggestion.content)
             existing = db.scalar(
                 select(ConversationConfirmationItem).where(
                     ConversationConfirmationItem.conversation_id == cid,
@@ -300,8 +301,8 @@ class SuggestionRuntime:
             if (
                 item is not None
                 and message is not None
-                and item.status is ConfirmationItemStatus.OPEN
-                and item.confirmation_source is not ConfirmationSource.MANUAL
+                and item.status == ConfirmationItemStatus.OPEN.value
+                and item.confirmation_source != ConfirmationSource.MANUAL.value
             ):
                 item.status = ConfirmationItemStatus.CONFIRMED
                 item.confirmation_source = ConfirmationSource.AUTO
