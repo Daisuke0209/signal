@@ -1074,7 +1074,9 @@ describe("approval requests", () => {
       }),
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "却下" }));
+    const rejectButton = screen.getByRole("button", { name: "却下" });
+    await waitFor(() => expect((rejectButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(rejectButton);
     expect(
       await screen.findByText(
         "承認結果を保存できませんでした。もう一度お試しください。",
