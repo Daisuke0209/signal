@@ -260,7 +260,10 @@ class SuggestionRuntime:
             )
         )
         for suggestion in output.suggestions:
-            if suggestion.kind != SuggestionKind.CONFIRMATION.value:
+            if suggestion.kind not in (
+                SuggestionKind.CONFIRMATION.value,
+                SuggestionKind.QUESTION.value,
+            ):
                 continue
             normalized_content = " ".join(suggestion.content.casefold().split())
             existing = db.scalar(
