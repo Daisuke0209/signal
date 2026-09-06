@@ -1,7 +1,7 @@
 "use client";
 
 import { observePaint, receivedAt } from "@/lib/browser-observations";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   addMessage,
@@ -342,10 +342,10 @@ export default function Home() {
     followsTranscript.current = isAtLatest;
     setIsFollowingTranscript(isAtLatest);
   }
-  function resetTranscriptFollow() {
+  const resetTranscriptFollow = useCallback(() => {
     followsTranscript.current = true;
     setIsFollowingTranscript(true);
-  }
+  }, []);
   useEffect(() => {
     if (!followsTranscript.current) return;
     const list = transcriptList.current;
@@ -468,14 +468,14 @@ export default function Home() {
       if (handoffGeneration.current === generation) setHandoffBusy(false);
     }
   }
-  async function load() {
+  const load = useCallback(async () => {
     const conversations = await listConversations();
     setItems(conversations);
     if (conversations[0]) {
       resetTranscriptFollow();
       setConversation(await getConversation(conversations[0].id));
     }
-  }
+  }, [resetTranscriptFollow]);
   useEffect(() => {
     void (async () => {
       try {
@@ -488,7 +488,7 @@ export default function Home() {
         setChecking(false);
       }
     })();
-  }, []);
+  }, [load]);
   async function signIn(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
