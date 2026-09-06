@@ -38,6 +38,7 @@ class AgentSuggestion(BaseModel):
     kind: str = Field(pattern="^(question|response|confirmation)$")
     content: str = Field(min_length=1, max_length=4000)
     evidence_ids: list[str] = Field(max_length=5)
+    customer_message_id: uuid.UUID | None
 
 
 class AgentOutput(BaseModel):
@@ -64,7 +65,8 @@ INSTRUCTIONS = """あなたは商談中の営業担当者を支援する Signal 
 商品仕様、価格、契約条件の断定には必ず search_documents で取得した根拠を使い、
 evidence_ids に根拠IDを付けてください。検索の根拠が足りなければ推測せず、
 確認が必要な点を confirmation として示してください。顧客の発言も商品仕様の根拠
-にはなりません。質問や会話上の相づちには根拠IDを付ける必要はありません。
+にはなりません。質問や会話上の相づちには根拠IDを付ける必要はありません。返答例には入力の顧客発言IDから
+対応対象を一つ選び、特定できなければ customer_message_id を null にしてください。
 資料の有無と検索可否は入力に示されます。利用できない場合は検索せず確認を促します。
 外部への連絡・承認・契約の実行を示唆せず、担当者が判断するための案だけを返します。
 原則として question、response、confirmation を一つずつ、不要なものは省略します。

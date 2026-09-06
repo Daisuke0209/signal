@@ -334,6 +334,11 @@
 .message[data-speaker="sales_rep"] p {
   color: #677181;
 }
+.responseTarget {
+  margin-top: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
 .transcriptEmpty {
   display: flex;
   min-height: 300px;

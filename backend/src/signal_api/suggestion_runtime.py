@@ -180,6 +180,14 @@ class SuggestionRuntime:
                     {"side": participant.side.value, "text": message.content[:1500]}
                     for message, participant in reversed(rows)
                 ],
+                "customer_message_candidates": [
+                    {
+                        "id": str(message.id),
+                        "text": message.content[:1500],
+                    }
+                    for message, participant in reversed(rows)
+                    if participant.side.value == "customer"
+                ],
             },
             ensure_ascii=False,
         )
@@ -242,6 +250,7 @@ class SuggestionRuntime:
                     kind=SuggestionKind(item.kind),
                     content=item.content,
                     sources=[evidence[key] for key in dict.fromkeys(item.evidence_ids)],
+                    customer_message_id=item.customer_message_id,
                 )
                 for item in output.suggestions
             ],

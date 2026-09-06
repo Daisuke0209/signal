@@ -100,6 +100,11 @@ function SuggestionItems({ suggestions }: { suggestions: Suggestion[] }) {
       {suggestions.map((suggestion) => (
         <article className={styles.suggestionItem} key={suggestion.id}>
           <p>{suggestion.content}</p>
+          {suggestion.kind === "response" && suggestion.customer_message_content && (
+            <p className={styles.responseTarget}>
+              対象の顧客発言: {suggestion.customer_message_content}
+            </p>
+          )}
           {suggestion.sources.length ? (
             <div className={styles.sources}>
               {suggestion.sources.map((source) => (
