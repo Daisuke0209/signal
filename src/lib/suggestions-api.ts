@@ -19,6 +19,8 @@ export type Suggestion = {
   content: string;
   position: number;
   sources: SuggestionSource[];
+  customer_message_id?: string | null;
+  customer_message_content?: string | null;
 };
 
 export type SuggestionRun = {

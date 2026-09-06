@@ -656,6 +656,8 @@ describe("authentication page", () => {
               content: "Standardプランをご案内します。",
               position: 1,
               sources: [],
+              customer_message_id: "customer-message-1",
+              customer_message_content: "SSOは利用できますか？",
             },
             {
               id: "confirmation-1",
@@ -670,6 +672,7 @@ describe("authentication page", () => {
     expect(await screen.findByText("導入時期を確認しますか？")).toBeDefined();
     expect(screen.getByText("料金表 · p.2")).toBeDefined();
     expect(screen.getAllByText("根拠なし")).toHaveLength(2);
+    expect(screen.getByText("対象の顧客発言: SSOは利用できますか？")).toBeDefined();
 
     onState({
         conversation_id: detail.id,
