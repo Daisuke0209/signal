@@ -253,7 +253,8 @@ def test_runtime_passes_only_selected_documents_to_search(
                             "type": "output_text",
                             "text": (
                                 '{"suggestions":[{"kind":"response",'
-                                '"content":"確認","evidence_ids":["s1p1"]}]}'
+                                '"content":"確認","evidence_ids":["s1p1"]}],'
+                                '"confirmation_evidence":[]}'
                             ),
                         }
                     ],
