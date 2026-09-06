@@ -696,3 +696,49 @@ def test_add_message_rejects_empty_content_without_saving(
             .where(ConversationMessage.conversation_id == conversation_id)
         )
     assert message_count == 0
+
+
+def test_confirmation_items_authorization_and_versioning(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    organization_id, _, email = conversation_user
+    with TestClient(app) as client:
+        assert (
+            client.get(f"/conversations/{uuid.uuid4()}/confirmation-items").status_code
+            == 401
+        )
+        login(client, email)
+        conversation_id = create_conversation(client, organization_id)
+        created = client.post(
+            f"/conversations/{conversation_id}/confirmation-items",
+            json={"content": "導入時期を確認する"},
+        )
+        assert created.status_code == 201
+        item = created.json()
+        assert item["status"] == "open" and item["version"] == 1
+        duplicate = client.post(
+            f"/conversations/{conversation_id}/confirmation-items",
+            json={"content": "  導入時期を確認する  "},
+        )
+        assert duplicate.status_code == 201
+        assert duplicate.json()["id"] == item["id"]
+        changed = client.patch(
+            f"/conversations/{conversation_id}/confirmation-items/{item['id']}",
+            json={"status": "confirmed", "expected_version": 1},
+        )
+        assert changed.status_code == 200
+        assert changed.json()["version"] == 2
+        assert changed.json()["confirmation_source"] == "manual"
+        assert (
+            client.patch(
+                f"/conversations/{conversation_id}/confirmation-items/{item['id']}",
+                json={"status": "open", "expected_version": 1},
+            ).status_code
+            == 409
+        )
+        assert (
+            client.get(f"/conversations/{conversation_id}/confirmation-items").json()[
+                "items"
+            ][0]["status"]
+            == "confirmed"
+        )
