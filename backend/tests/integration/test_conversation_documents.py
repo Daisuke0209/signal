@@ -180,7 +180,12 @@ def test_selection_change_invalidates_old_generation_and_noop_preserves_generati
     assert case.put([]).status_code == 200
     output = AgentOutput(
         suggestions=[
-            AgentSuggestion(kind="response", content="古い資料の提案", evidence_ids=[])
+            AgentSuggestion(
+                kind="response",
+                content="古い資料の提案",
+                evidence_ids=[],
+                customer_message_id=None,
+            )
         ],
         confirmation_evidence=[],
     )
@@ -253,8 +258,7 @@ def test_runtime_passes_only_selected_documents_to_search(
                             "type": "output_text",
                             "text": (
                                 '{"suggestions":[{"kind":"response",'
-                                '"content":"確認","evidence_ids":["s1p1"]}],'
-                                '"confirmation_evidence":[]}'
+                                '"content":"確認","evidence_ids":["s1p1"],"customer_message_id":null}],"confirmation_evidence":[]}'
                             ),
                         }
                     ],

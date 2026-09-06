@@ -646,6 +646,16 @@ class Suggestion(Base):
     sources: Mapped[list[dict[str, object]]] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    customer_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "conversation_messages.id",
+            name="suggestions_customer_message_id_fk",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+    customer_message_content: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class DocumentPage(Base):

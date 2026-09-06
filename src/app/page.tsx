@@ -99,6 +99,15 @@ function SuggestionItems({ suggestions }: { suggestions: Suggestion[] }) {
     <div className={styles.suggestionItems}>
       {suggestions.map((suggestion) => (
         <article className={styles.suggestionItem} key={suggestion.id}>
+          {suggestion.kind === "response" && (
+            <div className={styles.responseTarget}>
+              <p className={styles.responseTargetLabel}>対象の顧客発言</p>
+              <blockquote>
+                {suggestion.customer_message_content ??
+                  "対象の顧客発言を特定できませんでした"}
+              </blockquote>
+            </div>
+          )}
           <p>{suggestion.content}</p>
           {suggestion.sources.length ? (
             <div className={styles.sources}>

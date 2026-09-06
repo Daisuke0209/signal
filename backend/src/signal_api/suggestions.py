@@ -14,6 +14,8 @@ from signal_api.database import get_db_session
 from signal_api.models import (
     Conversation,
     ConversationMessage,
+    ConversationParticipant,
+    ConversationParticipantSide,
     ConversationStatus,
     Membership,
     Suggestion,
@@ -33,11 +35,13 @@ class SuggestionDraft(BaseModel):
     kind: SuggestionKind
     content: str = Field(min_length=1, max_length=4000)
     sources: list[Evidence] = Field(default_factory=list, max_length=5)
+    customer_message_id: uuid.UUID | None = None
 
 
 class SuggestionResponse(SuggestionDraft):
     id: uuid.UUID
     position: int
+    customer_message_content: str | None
 
 
 class SuggestionRunResponse(BaseModel):
@@ -126,6 +130,26 @@ def complete_suggestion_run(
     if run.status is not SuggestionRunStatus.RUNNING:
         raise ValueError("Only a running run can complete")
     for position, draft in enumerate(drafts):
+        target = None
+        if draft.kind is SuggestionKind.RESPONSE and draft.customer_message_id:
+            target = db.scalar(
+                select(ConversationMessage)
+                .join(
+                    ConversationParticipant,
+                    (ConversationParticipant.id == ConversationMessage.participant_id)
+                    & (
+                        ConversationParticipant.conversation_id
+                        == ConversationMessage.conversation_id
+                    ),
+                )
+                .where(
+                    ConversationMessage.id == draft.customer_message_id,
+                    ConversationMessage.conversation_id == run.conversation_id,
+                    ConversationMessage.sequence_number <= run.input_sequence_number,
+                    ConversationParticipant.side
+                    == ConversationParticipantSide.CUSTOMER,
+                )
+            )
         db.add(
             Suggestion(
                 run_id=run.id,
@@ -133,6 +157,8 @@ def complete_suggestion_run(
                 position=position,
                 content=draft.content,
                 sources=[source.model_dump(mode="json") for source in draft.sources],
+                customer_message_id=target.id if target else None,
+                customer_message_content=target.content if target else None,
             )
         )
     run.status = SuggestionRunStatus.SUCCEEDED
@@ -225,6 +251,8 @@ def latest_suggestions(
                     position=s.position,
                     content=s.content,
                     sources=[Evidence.model_validate(source) for source in s.sources],
+                    customer_message_id=s.customer_message_id,
+                    customer_message_content=s.customer_message_content,
                 )
                 for s in suggestions
             ],
