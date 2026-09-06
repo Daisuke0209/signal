@@ -9,6 +9,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
 
 from signal_api import domain_traces
 from signal_api.config import get_settings
@@ -29,6 +30,7 @@ from signal_api.security import hash_password
 from signal_api.suggestion_agent import (
     AgentOutput,
     AgentSuggestion,
+    ConfirmationEvidence,
     SuggestionAgent,
 )
 from signal_api.suggestion_events import events
@@ -102,6 +104,9 @@ def test_final_message_automatically_pushes_ordered_states_and_persists_result(
             body = json.loads(request.content)
             assert body["tools"] == []  # This organization has no searchable PDFs.
             assert "no_searchable_documents" in body["input"][0]["content"]
+            schema = body["text"]["format"]["schema"]
+            assert body["text"]["format"]["strict"] is True
+            assert "confirmation_evidence" in schema["required"]
             return httpx.Response(
                 200,
                 json={
@@ -200,7 +205,7 @@ def test_newer_input_prevents_old_generation_result_publication(actor: Actor) ->
         new_id = new.id
     output = AgentOutput(
         suggestions=[
-            AgentSuggestion(kind="response", content="古い提案", evidence_ids=[])
+            AgentSuggestion(kind="question", content="古い確認事項", evidence_ids=[])
         ],
         confirmation_evidence=[],
     )
@@ -219,6 +224,14 @@ def test_newer_input_prevents_old_generation_result_publication(actor: Actor) ->
         assert run.status == SuggestionRunStatus.FAILED
         assert (
             db.scalar(select(func.count(Suggestion.id)).where(Suggestion.run_id == rid))
+            == 0
+        )
+        assert (
+            db.scalar(
+                select(func.count(ConversationConfirmationItem.id)).where(
+                    ConversationConfirmationItem.conversation_id == cid
+                )
+            )
             == 0
         )
     assert client.get(f"/conversations/{cid}/suggestions").json()["latest_run"][
@@ -286,3 +299,167 @@ def test_sse_initial_snapshot_and_membership_revocation_close_stream(
     with pytest.raises(HTTPException) as caught:
         authorized_snapshot(None, cid)
     assert caught.value.status_code == 401
+
+
+def test_confirmation_item_auto_completion_respects_manual_reopen(actor: Actor) -> None:
+    client, cid, _, _, _ = actor
+    response = client.post(
+        f"/conversations/{cid}/messages",
+        json={
+            "speaker_label": "顧客",
+            "side": "customer",
+            "content": "導入時期は4月です",
+        },
+    )
+    assert response.status_code == 201
+    message_id = uuid.UUID(response.json()["id"])
+
+    def finish(output: AgentOutput) -> uuid.UUID:
+        def operation(db: Session) -> uuid.UUID:
+            run = queue_suggestion_run(db, cid)
+            start_suggestion_run(db, run.id)
+            runtime = SuggestionRuntime(SuggestionAgent(httpx.AsyncClient(), "unused"))
+            runtime.finish(db, cid, run.id, output, {})
+            return run.id
+
+        return transaction(operation)
+
+    finish(
+        AgentOutput(
+            suggestions=[
+                AgentSuggestion(
+                    kind="question", content="導入時期を確認する", evidence_ids=[]
+                )
+            ],
+            confirmation_evidence=[],
+        )
+    )
+    with SessionLocal() as db:
+        item = db.scalar(
+            select(ConversationConfirmationItem).where(
+                ConversationConfirmationItem.conversation_id == cid
+            )
+        )
+        assert item is not None
+        item_id = item.id
+
+    finish(
+        AgentOutput(
+            suggestions=[
+                AgentSuggestion(
+                    kind="response", content="承知しました", evidence_ids=[]
+                )
+            ],
+            confirmation_evidence=[
+                ConfirmationEvidence(
+                    confirmation_item_id=item_id,
+                    message_id=message_id,
+                )
+            ],
+        )
+    )
+    with SessionLocal() as db:
+        item = db.get(ConversationConfirmationItem, item_id)
+        assert item is not None
+        assert item.status == "confirmed"
+        assert item.confirmation_source == "auto"
+        version = item.version
+        assert item.evidence_message_id == message_id
+
+    changed = client.patch(
+        f"/conversations/{cid}/confirmation-items/{item_id}",
+        json={"status": "open", "expected_version": version},
+    )
+    assert changed.status_code == 200
+    assert changed.json()["confirmation_source"] == "manual"
+
+    finish(
+        AgentOutput(
+            suggestions=[
+                AgentSuggestion(
+                    kind="response", content="承知しました", evidence_ids=[]
+                )
+            ],
+            confirmation_evidence=[
+                ConfirmationEvidence(
+                    confirmation_item_id=item_id,
+                    message_id=message_id,
+                )
+            ],
+        )
+    )
+    with SessionLocal() as db:
+        item = db.get(ConversationConfirmationItem, item_id)
+        assert item is not None
+        assert item.status == "open"
+        assert item.confirmation_source == "manual"
+
+
+def test_confirmation_evidence_from_another_conversation_does_not_mutate_item(
+    actor: Actor,
+) -> None:
+    client, cid, oid, uid, _ = actor
+    message(client, cid, "予算は100万円です")
+    with SessionLocal() as db:
+        other_cid = uuid.uuid4()
+        db.add(Conversation(id=other_cid, organization_id=oid, created_by_user_id=uid))
+        db.commit()
+    response = client.post(
+        f"/conversations/{other_cid}/messages",
+        json={
+            "speaker_label": "顧客",
+            "side": "customer",
+            "content": "他会話の発言です",
+        },
+    )
+    assert response.status_code == 201
+    other_message_id = uuid.UUID(response.json()["id"])
+
+    def complete(output: AgentOutput) -> None:
+        def operation(db: Session) -> None:
+            run = queue_suggestion_run(db, cid)
+            start_suggestion_run(db, run.id)
+            runtime = SuggestionRuntime(SuggestionAgent(httpx.AsyncClient(), "unused"))
+            runtime.finish(db, cid, run.id, output, {})
+
+        transaction(operation)
+
+    complete(
+        AgentOutput(
+            suggestions=[
+                AgentSuggestion(
+                    kind="confirmation", content="予算を確認する", evidence_ids=[]
+                )
+            ],
+            confirmation_evidence=[],
+        )
+    )
+    with SessionLocal() as db:
+        item = db.scalar(
+            select(ConversationConfirmationItem).where(
+                ConversationConfirmationItem.conversation_id == cid
+            )
+        )
+        assert item is not None
+        item_id = item.id
+
+    complete(
+        AgentOutput(
+            suggestions=[
+                AgentSuggestion(
+                    kind="response", content="承知しました", evidence_ids=[]
+                )
+            ],
+            confirmation_evidence=[
+                ConfirmationEvidence(
+                    confirmation_item_id=item_id, message_id=other_message_id
+                )
+            ],
+        )
+    )
+    with SessionLocal() as db:
+        item = db.get(ConversationConfirmationItem, item_id)
+        assert item is not None
+        assert item.status == "open"
+        assert item.confirmation_source is None
+        assert item.evidence_message_id is None
