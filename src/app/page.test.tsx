@@ -672,7 +672,36 @@ describe("authentication page", () => {
     expect(await screen.findByText("導入時期を確認しますか？")).toBeDefined();
     expect(screen.getByText("料金表 · p.2")).toBeDefined();
     expect(screen.getAllByText("根拠なし")).toHaveLength(2);
-    expect(screen.getByText("対象の顧客発言: SSOは利用できますか？")).toBeDefined();
+    expect(screen.getByText("顧客の質問")).toBeDefined();
+    expect(screen.getByText("SSOは利用できますか？")).toBeDefined();
+
+    onState({
+        conversation_id: detail.id,
+        latest_run: {
+          id: "run-2",
+          generation: 2,
+          revision: 3,
+          input_sequence_number: 2,
+          status: "succeeded",
+          phase: null,
+          error_code: null,
+          created_at: detail.created_at,
+          started_at: detail.created_at,
+          completed_at: detail.created_at,
+          suggestions: [
+            {
+              id: "response-unmatched",
+              kind: "response",
+              content: "対象なしでも返答例を表示します。",
+              position: 0,
+              sources: [],
+              customer_message_id: null,
+              customer_message_content: null,
+            },
+          ],
+        },
+      });
+    expect(await screen.findByText("対応する顧客の発言を特定できませんでした")).toBeDefined();
 
     onState({
         conversation_id: detail.id,
