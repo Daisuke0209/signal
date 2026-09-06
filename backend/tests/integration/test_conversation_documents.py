@@ -181,7 +181,8 @@ def test_selection_change_invalidates_old_generation_and_noop_preserves_generati
     output = AgentOutput(
         suggestions=[
             AgentSuggestion(kind="response", content="古い資料の提案", evidence_ids=[])
-        ]
+        ],
+        confirmation_evidence=[],
     )
 
     async def finish_old() -> None:
