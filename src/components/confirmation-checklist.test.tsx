@@ -88,3 +88,17 @@ it("renders ended conversations read-only", async () => {
   fireEvent.click(screen.getByRole("checkbox"));
   expect(api.updateConfirmationItem).not.toHaveBeenCalled();
 });
+
+it("does not replace a manual result with an in-flight read", async () => {
+  let resolveRead!: (value: ConfirmationItem[]) => void;
+  api.updateConfirmationItem.mockResolvedValue({ ...item, version: 2, status: "confirmed", confirmation_source: "manual" });
+  const view = render(<ConfirmationChecklist {...props} />);
+  await screen.findByRole("checkbox");
+  api.getConfirmationItems.mockImplementationOnce(() => new Promise((resolve) => { resolveRead = resolve; }));
+  view.rerender(<ConfirmationChecklist {...props} refreshToken="run:2" />);
+  await waitFor(() => expect(api.getConfirmationItems).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole("checkbox"));
+  await screen.findByText("手動で確認済み");
+  await act(async () => resolveRead([item]));
+  expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+});

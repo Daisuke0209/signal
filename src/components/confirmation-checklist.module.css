@@ -16,3 +16,4 @@
 .error { margin-top: 12px; color: #94423c; font-size: 12px; line-height: 1.7; }
 .error button { margin-top: 6px; border: 1px solid #d8dee7; padding: 5px 12px; border-radius: 6px; background: white; color: #51617b; cursor: pointer; }
 .notice { margin-top: 12px; color: #516b5e; font-size: 12px; line-height: 1.7; }
+.check span { min-width: 0; overflow-wrap: anywhere; }
