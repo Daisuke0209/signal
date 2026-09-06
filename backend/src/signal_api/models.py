@@ -362,7 +362,7 @@ class ConversationConfirmationItem(Base):
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    normalized_content: Mapped[str] = mapped_column(String(64), nullable=False)
+    normalized_content: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[ConfirmationItemStatus] = mapped_column(
         String(16),
         nullable=False,

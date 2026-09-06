@@ -31,7 +31,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("content", sa.Text(), nullable=False),
-        sa.Column("normalized_content", sa.String(64), nullable=False),
+        sa.Column("normalized_content", sa.String(500), nullable=False),
         sa.Column(
             "status", sa.String(16), nullable=False, server_default=sa.text("'open'")
         ),

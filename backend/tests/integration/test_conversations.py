@@ -742,3 +742,123 @@ def test_confirmation_items_authorization_and_versioning(
             ][0]["status"]
             == "confirmed"
         )
+
+
+def test_confirmation_items_reject_foreign_organization_without_writes(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    _, uid, email = conversation_user
+    oid, cid = uuid.uuid4(), uuid.uuid4()
+    with SessionLocal.begin() as db:
+        db.add(
+            Organization(id=oid, name="Other checklist org", slug=f"checklist-{oid}")
+        )
+        db.flush()
+        db.add(Conversation(id=cid, organization_id=oid, created_by_user_id=uid))
+    try:
+        with TestClient(app) as client:
+            login(client, email)
+            path = f"/conversations/{cid}/confirmation-items"
+            assert client.get(path).status_code == 403
+            assert client.post(path, json={"content": "秘密の条件"}).status_code == 403
+            assert (
+                client.patch(
+                    f"{path}/{uuid.uuid4()}",
+                    json={"status": "confirmed", "expected_version": 1},
+                ).status_code
+                == 403
+            )
+    finally:
+        with SessionLocal.begin() as db:
+            db.execute(delete(Organization).where(Organization.id == oid))
+
+
+def test_confirmation_items_validate_origin_and_keep_ended_conversation_read_only(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    oid, _, email = conversation_user
+    with TestClient(app) as client:
+        login(client, email)
+        cid = create_conversation(client, oid)
+        other = create_conversation(client, oid)
+        other_message = client.post(
+            f"/conversations/{other}/messages", json=message_request()
+        ).json()
+        path = f"/conversations/{cid}/confirmation-items"
+        assert (
+            client.post(
+                path,
+                json={
+                    "content": "予算を確認する",
+                    "origin_message_id": other_message["id"],
+                },
+            ).status_code
+            == 422
+        )
+        assert client.get(path).json()["items"] == []
+        own_message = client.post(
+            f"/conversations/{cid}/messages", json=message_request()
+        ).json()
+        items = [
+            client.post(
+                path, json={"content": content, "origin_message_id": own_message["id"]}
+            ).json()
+            for content in ("予算を確認する", "利用人数を確認する")
+        ]
+        assert (
+            items[0]["id"] != items[1]["id"]
+        )  # One utterance can raise two questions.
+        assert client.post(f"/conversations/{cid}/end").status_code == 200
+        assert client.post(path, json={"content": "追加"}).status_code == 409
+        assert (
+            client.patch(
+                f"{path}/{items[0]['id']}",
+                json={"status": "confirmed", "expected_version": 1},
+            ).status_code
+            == 409
+        )
+        saved = client.get(path).json()["items"]
+        assert len(saved) == 2 and all(item["status"] == "open" for item in saved)
+
+
+def test_confirmation_item_concurrent_updates_have_one_winner(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    oid, _, email = conversation_user
+    with TestClient(app) as setup:
+        login(setup, email)
+        cid = create_conversation(setup, oid)
+        path = f"/conversations/{cid}/confirmation-items"
+        item = setup.post(path, json={"content": "契約期間を確認する"}).json()
+        barrier = Barrier(2)
+
+        def update(desired: str) -> int:
+            with TestClient(app) as client:
+                login(client, email)
+                barrier.wait(timeout=10)
+                response = client.patch(
+                    f"{path}/{item['id']}",
+                    json={"status": desired, "expected_version": 1},
+                )
+                return int(response.status_code)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = list(pool.map(update, ["confirmed", "open"]))
+        assert sorted(statuses) == [200, 409]
+        saved = setup.get(path).json()["items"][0]
+        assert saved["version"] == 2 and saved["confirmation_source"] == "manual"
+
+
+def test_confirmation_key_handles_casefold_expansion_and_equivalent_content(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    oid, _, email = conversation_user
+    with TestClient(app) as client:
+        login(client, email)
+        cid = create_conversation(client, oid)
+        path = f"/conversations/{cid}/confirmation-items"
+        assert client.post(path, json={"content": "ß" * 500}).status_code == 201
+        first = client.post(path, json={"content": "ＳＳＯ ß 条件"}).json()
+        second = client.post(path, json={"content": "ＳＳＯ ss  条件"}).json()
+        assert first["id"] == second["id"]
+        assert len(client.get(path).json()["items"]) == 2
