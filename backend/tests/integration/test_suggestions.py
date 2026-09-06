@@ -287,7 +287,7 @@ def test_ended_and_empty_conversations_do_not_queue(
 def test_response_target_is_server_validated_and_snapshotted(
     actor: tuple[TestClient, uuid.UUID, uuid.UUID, uuid.UUID],
 ) -> None:
-    client, cid, _, _ = actor
+    client, cid, org_id, _ = actor
     message_id = uuid.UUID(
         client.get(f"/conversations/{cid}").json()["messages"][0]["id"]
     )
@@ -310,6 +310,25 @@ def test_response_target_is_server_validated_and_snapshotted(
     later_id = uuid.UUID(
         client.get(f"/conversations/{cid}").json()["messages"][-1]["id"]
     )
+    other_cid = uuid.UUID(
+        client.post("/conversations", json={"organization_id": str(org_id)}).json()[
+            "id"
+        ]
+    )
+    assert (
+        client.post(
+            f"/conversations/{other_cid}/messages",
+            json={
+                "speaker_label": "別の顧客",
+                "side": "customer",
+                "content": "別会話の質問です",
+            },
+        ).status_code
+        == 201
+    )
+    other_message_id = uuid.UUID(
+        client.get(f"/conversations/{other_cid}").json()["messages"][0]["id"]
+    )
     with SessionLocal() as db:
         complete_suggestion_run(
             db,
@@ -327,8 +346,23 @@ def test_response_target_is_server_validated_and_snapshotted(
                 ),
                 SuggestionDraft(
                     kind=SuggestionKind.RESPONSE,
+                    content="別会話の対象",
+                    customer_message_id=other_message_id,
+                ),
+                SuggestionDraft(
+                    kind=SuggestionKind.RESPONSE,
                     content="存在しない対象",
                     customer_message_id=uuid.uuid4(),
+                ),
+                SuggestionDraft(
+                    kind=SuggestionKind.QUESTION,
+                    content="質問にIDを渡しても保存しない",
+                    customer_message_id=message_id,
+                ),
+                SuggestionDraft(
+                    kind=SuggestionKind.CONFIRMATION,
+                    content="確認事項にIDを渡しても保存しない",
+                    customer_message_id=message_id,
                 ),
             ],
         )
@@ -338,8 +372,17 @@ def test_response_target_is_server_validated_and_snapshotted(
     ]
     assert suggestions[0]["customer_message_id"] == str(message_id)
     assert suggestions[0]["customer_message_content"] == "SSOは使えますか"
-    assert [item["customer_message_id"] for item in suggestions[1:]] == [None, None]
+    assert [item["customer_message_id"] for item in suggestions[1:]] == [
+        None,
+        None,
+        None,
+        None,
+        None,
+    ]
     assert [item["customer_message_content"] for item in suggestions[1:]] == [
+        None,
+        None,
+        None,
         None,
         None,
     ]
