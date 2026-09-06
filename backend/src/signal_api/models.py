@@ -324,6 +324,74 @@ class ConversationDocument(Base):
     )
 
 
+class ConfirmationItemStatus(StrEnum):
+    OPEN = "open"
+    CONFIRMED = "confirmed"
+
+
+class ConfirmationSource(StrEnum):
+    AUTO = "auto"
+    MANUAL = "manual"
+
+
+class ConversationConfirmationItem(Base):
+    __tablename__ = "conversation_confirmation_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id",
+            "normalized_content",
+            name="conversation_confirmation_items_conversation_content_unique",
+        ),
+        Index("conversation_confirmation_items_conversation_id_idx", "conversation_id"),
+        CheckConstraint(
+            "status IN ('open', 'confirmed')",
+            name="conversation_confirmation_items_status_check",
+        ),
+        CheckConstraint(
+            "version > 0", name="conversation_confirmation_items_version_check"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_content: Mapped[str] = mapped_column(String(500), nullable=False)
+    status: Mapped[ConfirmationItemStatus] = mapped_column(
+        String(16),
+        nullable=False,
+        server_default=text("'open'"),
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    origin_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    evidence_message_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_messages.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    confirmation_source: Mapped[ConfirmationSource | None] = mapped_column(
+        String(16), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class TranscriptionSession(Base):
     __tablename__ = "transcription_sessions"
 

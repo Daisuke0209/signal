@@ -11,7 +11,10 @@ from signal_api.auth import CurrentUser
 from signal_api.config import get_settings
 from signal_api.database import get_db_session
 from signal_api.models import (
+    ConfirmationItemStatus,
+    ConfirmationSource,
     Conversation,
+    ConversationConfirmationItem,
     ConversationDocument,
     ConversationMessage,
     ConversationParticipant,
@@ -48,6 +51,41 @@ class ConversationDocumentsRequest(BaseModel):
 class ConversationDocumentResponse(BaseModel):
     id: uuid.UUID
     filename: str
+
+
+class ConfirmationItemResponse(BaseModel):
+    id: uuid.UUID
+    content: str
+    status: ConfirmationItemStatus
+    version: int
+    origin_message_id: uuid.UUID | None
+    evidence_message_id: uuid.UUID | None
+    evidence_excerpt: str | None
+    confirmation_source: ConfirmationSource | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ConfirmationItemsResponse(BaseModel):
+    items: list[ConfirmationItemResponse]
+
+
+class CreateConfirmationItemRequest(BaseModel):
+    content: str = Field(max_length=500)
+    origin_message_id: uuid.UUID | None = None
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Value must not be empty")
+        return value
+
+
+class UpdateConfirmationItemRequest(BaseModel):
+    status: ConfirmationItemStatus
+    expected_version: int = Field(ge=1)
 
 
 class ConversationListItemResponse(BaseModel):
@@ -258,6 +296,131 @@ def _authorized_conversation(
     ):
         raise HTTPException(status_code=403, detail="Not a member of this organization")
     return conversation
+
+
+def _confirmation_item_response(
+    item: ConversationConfirmationItem, db: Session
+) -> ConfirmationItemResponse:
+    evidence = (
+        db.get(ConversationMessage, item.evidence_message_id)
+        if item.evidence_message_id
+        else None
+    )
+    return ConfirmationItemResponse(
+        id=item.id,
+        content=item.content,
+        status=item.status,
+        version=item.version,
+        origin_message_id=item.origin_message_id,
+        evidence_message_id=item.evidence_message_id,
+        evidence_excerpt=evidence.content if evidence else None,
+        confirmation_source=item.confirmation_source,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
+@router.get(
+    "/{conversation_id}/confirmation-items", response_model=ConfirmationItemsResponse
+)
+def list_confirmation_items(
+    conversation_id: uuid.UUID, db: DatabaseSession, current_user: CurrentUser
+) -> ConfirmationItemsResponse:
+    conversation = _authorized_conversation(conversation_id, current_user.id, db)
+    items = db.scalars(
+        select(ConversationConfirmationItem)
+        .where(ConversationConfirmationItem.conversation_id == conversation.id)
+        .order_by(
+            ConversationConfirmationItem.created_at, ConversationConfirmationItem.id
+        )
+    ).all()
+    return ConfirmationItemsResponse(
+        items=[_confirmation_item_response(item, db) for item in items]
+    )
+
+
+@router.post(
+    "/{conversation_id}/confirmation-items",
+    response_model=ConfirmationItemResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_confirmation_item(
+    conversation_id: uuid.UUID,
+    request: CreateConfirmationItemRequest,
+    db: DatabaseSession,
+    current_user: CurrentUser,
+) -> ConfirmationItemResponse:
+    conversation = _authorized_conversation(
+        conversation_id, current_user.id, db, lock=True
+    )
+    if conversation.status is ConversationStatus.ENDED:
+        raise HTTPException(status_code=409, detail="Conversation has ended")
+    if (
+        request.origin_message_id is not None
+        and db.scalar(
+            select(ConversationMessage.id).where(
+                ConversationMessage.id == request.origin_message_id,
+                ConversationMessage.conversation_id == conversation.id,
+            )
+        )
+        is None
+    ):
+        raise HTTPException(
+            status_code=422, detail="Origin message must belong to this conversation"
+        )
+    normalized_content = " ".join(request.content.casefold().split())
+    item = db.scalar(
+        select(ConversationConfirmationItem).where(
+            ConversationConfirmationItem.conversation_id == conversation.id,
+            ConversationConfirmationItem.normalized_content == normalized_content,
+        )
+    )
+    if item is None:
+        item = ConversationConfirmationItem(
+            conversation_id=conversation.id,
+            content=request.content,
+            normalized_content=normalized_content,
+            origin_message_id=request.origin_message_id,
+            confirmation_source=ConfirmationSource.MANUAL,
+        )
+        db.add(item)
+        db.commit()
+    return _confirmation_item_response(item, db)
+
+
+@router.patch(
+    "/{conversation_id}/confirmation-items/{item_id}",
+    response_model=ConfirmationItemResponse,
+)
+def update_confirmation_item(
+    conversation_id: uuid.UUID,
+    item_id: uuid.UUID,
+    request: UpdateConfirmationItemRequest,
+    db: DatabaseSession,
+    current_user: CurrentUser,
+) -> ConfirmationItemResponse:
+    conversation = _authorized_conversation(
+        conversation_id, current_user.id, db, lock=True
+    )
+    if conversation.status is ConversationStatus.ENDED:
+        raise HTTPException(status_code=409, detail="Conversation has ended")
+    item = db.scalar(
+        select(ConversationConfirmationItem)
+        .where(
+            ConversationConfirmationItem.id == item_id,
+            ConversationConfirmationItem.conversation_id == conversation.id,
+        )
+        .with_for_update()
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Confirmation item not found")
+    if item.version != request.expected_version:
+        raise HTTPException(status_code=409, detail="Confirmation item has changed")
+    item.status = request.status
+    item.confirmation_source = ConfirmationSource.MANUAL
+    item.version += 1
+    db.commit()
+    return _confirmation_item_response(item, db)
 
 
 @router.get(
