@@ -39,6 +39,7 @@ function Checklist({ conversationId, ended, refreshToken }: Props) {
   const [forbidden, setForbidden] = useState(false);
   const live = useRef(false);
   const mutating = useRef(false);
+  const reading = useRef(false);
   const requestVersion = useRef(0);
 
   const reportError = useCallback((failure: unknown, message: string) => {
@@ -55,7 +56,8 @@ function Checklist({ conversationId, ended, refreshToken }: Props) {
   }, []);
 
   const refresh = useCallback(async () => {
-    if (mutating.current) return;
+    if (mutating.current || reading.current) return;
+    reading.current = true;
     const version = ++requestVersion.current;
     try {
       const incoming = await getConfirmationItems(conversationId);
@@ -67,6 +69,8 @@ function Checklist({ conversationId, ended, refreshToken }: Props) {
     } catch (failure) {
       if (live.current && version === requestVersion.current)
         reportError(failure, "確認事項を読み込めませんでした。再試行してください。");
+    } finally {
+      reading.current = false;
     }
   }, [conversationId, reportError]);
 
