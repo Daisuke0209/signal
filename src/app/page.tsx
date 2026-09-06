@@ -149,6 +149,9 @@ export default function Home() {
   const observedPartialSessions = useRef(new Set<string>());
   const latestTranscript = useRef<TranscriptEvent | null>(null);
   const [partials, setPartials] = useState<Record<string, TranscriptEvent>>({});
+  const transcriptList = useRef<HTMLDivElement | null>(null);
+  const followsTranscript = useRef(true);
+  const [isFollowingTranscript, setIsFollowingTranscript] = useState(true);
   const [isStopping, setIsStopping] = useState(false);
   const [showManualInput, setShowManualInput] = useState(false);
   const [captureState, setCaptureState] = useState("停止中");
@@ -325,6 +328,29 @@ export default function Home() {
   }
   useEffect(() => () => stopCapture(), []);
   const conversationId = conversation?.id;
+  function scrollTranscriptToLatest() {
+    const list = transcriptList.current;
+    if (list) list.scrollTop = list.scrollHeight;
+    followsTranscript.current = true;
+    setIsFollowingTranscript(true);
+  }
+  function updateTranscriptFollow() {
+    const list = transcriptList.current;
+    if (!list) return;
+    const isAtLatest =
+      list.scrollHeight - list.clientHeight - list.scrollTop <= 24;
+    followsTranscript.current = isAtLatest;
+    setIsFollowingTranscript(isAtLatest);
+  }
+  function resetTranscriptFollow() {
+    followsTranscript.current = true;
+    setIsFollowingTranscript(true);
+  }
+  useEffect(() => {
+    if (!followsTranscript.current) return;
+    const list = transcriptList.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }, [conversationId, conversation?.messages, partials]);
   useEffect(() => {
     if (
       !conversationId ||
@@ -445,8 +471,10 @@ export default function Home() {
   async function load() {
     const conversations = await listConversations();
     setItems(conversations);
-    if (conversations[0])
+    if (conversations[0]) {
+      resetTranscriptFollow();
       setConversation(await getConversation(conversations[0].id));
+    }
   }
   useEffect(() => {
     void (async () => {
@@ -481,6 +509,7 @@ export default function Home() {
   }
   async function select(id: string) {
     stopCapture();
+    resetTranscriptFollow();
     setShowManualInput(false);
     setSuggestionRun(null);
     setSuggestionConnectionError(false);
@@ -639,6 +668,7 @@ export default function Home() {
     try {
       const created = await createConversation(user.organizations[0].id);
       stopCapture();
+      resetTranscriptFollow();
       setShowManualInput(false);
       setSuggestionRun(null);
       setSuggestionConnectionError(false);
@@ -708,6 +738,7 @@ export default function Home() {
     try {
       await logout();
       stopCapture();
+      resetTranscriptFollow();
       resetApprovals();
       resetHandoffs();
       setUser(null);
@@ -972,7 +1003,12 @@ export default function Home() {
                 {conversation?.messages.length ?? 0} 発言
               </span>
             </div>
-            <div className={styles.messageList}>
+            <div
+              className={styles.messageList}
+              data-testid="transcript-messages"
+              onScroll={updateTranscriptFollow}
+              ref={transcriptList}
+            >
               {conversation?.messages.map((message) => (
                 <article
                   className={styles.message}
@@ -1026,6 +1062,15 @@ export default function Home() {
                   </div>
                 )}
             </div>
+            {!isFollowingTranscript && conversation && (
+              <button
+                className={styles.latestTranscriptButton}
+                onClick={scrollTranscriptToLatest}
+                type="button"
+              >
+                最新へ戻る
+              </button>
+            )}
             {conversation?.status === "active" && (
               <div className={styles.manualTools}>
                 <button

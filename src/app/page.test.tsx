@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { TranscriptEvent } from "@/lib/live-transcription";
 
 const liveMocks = vi.hoisted(() => ({ start: vi.fn(), abort: vi.fn(), stop: vi.fn() }));
 const suggestionMocks = vi.hoisted(() => ({
@@ -58,6 +59,25 @@ function jsonResponse(value: unknown): Response {
   return new Response(JSON.stringify(value), {
     status: 200,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+function setTranscriptScrollMetrics(
+  element: HTMLElement,
+  { scrollTop, scrollHeight }: { scrollTop: number; scrollHeight: number },
+) {
+  Object.defineProperties(element, {
+    clientHeight: { configurable: true, value: 100 },
+    scrollHeight: { configurable: true, value: scrollHeight, writable: true },
+    scrollTop: { configurable: true, value: scrollTop, writable: true },
+  });
+}
+
+function setTranscriptScrollHeight(element: HTMLElement, scrollHeight: number) {
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    value: scrollHeight,
+    writable: true,
   });
 }
 
@@ -385,6 +405,156 @@ describe("authentication page", () => {
       "http://localhost:8000/conversations/conversation-1/messages",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("follows partial and final transcript updates only while viewing the latest messages", async () => {
+    let onTranscript: ((event: TranscriptEvent) => void) | undefined;
+    const track = {
+      stop: vi.fn(),
+      addEventListener: vi.fn(),
+    } as unknown as MediaStreamTrack;
+    audioMocks.start.mockResolvedValue({
+      displayStream: { getTracks: () => [track], getAudioTracks: () => [track] },
+      microphoneStream: { getTracks: () => [track], getAudioTracks: () => [track] },
+    });
+    liveMocks.start.mockImplementationOnce(
+      async (_capture, _conversationId, _signal, update) => {
+        onTranscript = update;
+        return { abort: liveMocks.abort, stop: liveMocks.stop };
+      },
+    );
+    const detail = {
+      id: "conversation-scroll",
+      organization_id: "org-1",
+      created_by_user_id: currentUser.id,
+      status: "active",
+      created_at: "2026-09-05T12:00:00Z",
+      participants: [],
+      messages: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          jsonResponse({
+            ...currentUser,
+            organizations: [
+              { id: "org-1", name: "Demo", slug: "demo", role: "admin" },
+            ],
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse([detail]))
+        .mockResolvedValueOnce(jsonResponse(detail)),
+    );
+    render(<Home />);
+    await screen.findByText("会話を受け取る準備ができました");
+    const list = screen.getByTestId("transcript-messages");
+    setTranscriptScrollMetrics(list, { scrollTop: 300, scrollHeight: 400 });
+    fireEvent.scroll(list);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Meet音声とマイクを取得" }),
+    );
+    await waitFor(() => expect(onTranscript).toBeDefined());
+
+    onTranscript?.({
+      type: "partial",
+      source: "display",
+      item_id: "item-1",
+      session_id: "session-1",
+      text: "聞き取り中の発言",
+      side: "customer",
+      message: null,
+    });
+    expect(await screen.findByText("聞き取り中の発言")).toBeDefined();
+    expect(list.scrollTop).toBe(400);
+
+    setTranscriptScrollMetrics(list, { scrollTop: 40, scrollHeight: 500 });
+    fireEvent.scroll(list);
+    expect(await screen.findByRole("button", { name: "最新へ戻る" })).toBeDefined();
+    onTranscript?.({
+      type: "partial",
+      source: "display",
+      item_id: "item-1",
+      session_id: "session-1",
+      text: "過去を読んでいる間の更新",
+      side: "customer",
+      message: null,
+    });
+    expect(await screen.findByText("過去を読んでいる間の更新")).toBeDefined();
+    expect(list.scrollTop).toBe(40);
+
+    setTranscriptScrollHeight(list, 600);
+    fireEvent.click(screen.getByRole("button", { name: "最新へ戻る" }));
+    expect(list.scrollTop).toBe(600);
+    onTranscript?.({
+      type: "final",
+      source: "display",
+      item_id: "item-1",
+      session_id: "session-1",
+      text: "確定した発言",
+      side: "customer",
+      message: {
+        id: "message-final",
+        participant_id: "participant-1",
+        speaker_label: "通話相手",
+        side: "customer",
+        sequence_number: 1,
+        content: "確定した発言",
+      },
+    });
+    expect(await screen.findByText("確定した発言")).toBeDefined();
+    expect(list.scrollTop).toBe(600);
+  });
+
+  it("resets transcript follow when switching conversations", async () => {
+    const first = {
+      id: "conversation-scroll-1",
+      organization_id: "org-1",
+      status: "active",
+      created_at: "2026-09-05T12:00:00Z",
+    };
+    const second = {
+      ...first,
+      id: "conversation-scroll-2",
+      created_at: "2026-09-05T12:01:00Z",
+    };
+    const detail = (conversation: typeof first, content: string) => ({
+      ...conversation,
+      created_by_user_id: currentUser.id,
+      participants: [],
+      messages: [
+        {
+          id: `${conversation.id}-message`,
+          participant_id: "participant-1",
+          speaker_label: "通話相手",
+          side: "customer" as const,
+          sequence_number: 1,
+          content,
+        },
+      ],
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(userResponse())
+        .mockResolvedValueOnce(jsonResponse([first, second]))
+        .mockResolvedValueOnce(jsonResponse(detail(first, "最初の商談")))
+        .mockResolvedValueOnce(jsonResponse(detail(second, "次の商談"))),
+    );
+    render(<Home />);
+    await screen.findByText("最初の商談");
+    const list = screen.getByTestId("transcript-messages");
+    setTranscriptScrollMetrics(list, { scrollTop: 20, scrollHeight: 400 });
+    fireEvent.scroll(list);
+    expect(await screen.findByRole("button", { name: "最新へ戻る" })).toBeDefined();
+
+    setTranscriptScrollHeight(list, 600);
+    fireEvent.click(screen.getAllByRole("button", { name: /商談/ })[1]);
+    expect(await screen.findByText("次の商談")).toBeDefined();
+    expect(list.scrollTop).toBe(600);
+    expect(screen.queryByRole("button", { name: "最新へ戻る" })).toBeNull();
   });
 
   it("renders the newest streamed proposal generation with sources and state", async () => {
