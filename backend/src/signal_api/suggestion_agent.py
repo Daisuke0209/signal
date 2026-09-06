@@ -49,9 +49,7 @@ class ConfirmationEvidence(BaseModel):
 class AgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     suggestions: list[AgentSuggestion] = Field(min_length=1, max_length=6)
-    confirmation_evidence: list[ConfirmationEvidence] = Field(
-        default_factory=list, max_length=6
-    )
+    confirmation_evidence: list[ConfirmationEvidence] = Field(max_length=6)
 
 
 class SearchArguments(BaseModel):

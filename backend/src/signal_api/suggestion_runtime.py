@@ -253,6 +253,32 @@ class SuggestionRuntime:
         ):
             fail_suggestion_run(db, rid, SuggestionErrorCode.INTERRUPTED)
             return
+        origin_message_id = db.scalar(
+            select(ConversationMessage.id).where(
+                ConversationMessage.conversation_id == cid,
+                ConversationMessage.sequence_number == run.input_sequence_number,
+            )
+        )
+        for suggestion in output.suggestions:
+            if suggestion.kind != SuggestionKind.CONFIRMATION.value:
+                continue
+            normalized_content = " ".join(suggestion.content.casefold().split())
+            existing = db.scalar(
+                select(ConversationConfirmationItem).where(
+                    ConversationConfirmationItem.conversation_id == cid,
+                    ConversationConfirmationItem.normalized_content
+                    == normalized_content,
+                )
+            )
+            if existing is None:
+                db.add(
+                    ConversationConfirmationItem(
+                        conversation_id=cid,
+                        content=suggestion.content,
+                        normalized_content=normalized_content,
+                        origin_message_id=origin_message_id,
+                    )
+                )
         for match in output.confirmation_evidence:
             item = db.scalar(
                 select(ConversationConfirmationItem)
