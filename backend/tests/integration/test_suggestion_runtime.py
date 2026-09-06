@@ -16,6 +16,7 @@ from signal_api.database import SessionLocal
 from signal_api.main import app
 from signal_api.models import (
     Conversation,
+    ConversationConfirmationItem,
     ConversationParticipantSide,
     Membership,
     Organization,
@@ -159,6 +160,13 @@ def test_final_message_automatically_pushes_ordered_states_and_persists_result(
                 await runtime.close()
 
     asyncio.run(scenario())
+    with SessionLocal() as db:
+        items = db.scalars(
+            select(ConversationConfirmationItem).where(
+                ConversationConfirmationItem.conversation_id == cid
+            )
+        ).all()
+    assert [item.content for item in items] == ["確認"]
     records = [
         json.loads(record.message)
         for record in caplog.records
