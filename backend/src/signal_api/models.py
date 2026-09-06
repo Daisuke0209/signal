@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from hashlib import sha256
 
 from sqlalchemy import (
     CheckConstraint,
@@ -361,7 +362,7 @@ class ConversationConfirmationItem(Base):
         nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    normalized_content: Mapped[str] = mapped_column(String(500), nullable=False)
+    normalized_content: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[ConfirmationItemStatus] = mapped_column(
         String(16),
         nullable=False,
@@ -390,6 +391,10 @@ class ConversationConfirmationItem(Base):
         server_default=func.now(),
         onupdate=func.now(),
     )
+
+
+def confirmation_item_key(content: str) -> str:
+    return sha256(" ".join(content.casefold().split()).encode()).hexdigest()
 
 
 class TranscriptionSession(Base):

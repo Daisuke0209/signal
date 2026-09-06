@@ -23,6 +23,7 @@ from signal_api.models import (
     Document,
     DocumentProcessingStatus,
     Membership,
+    confirmation_item_key,
 )
 from signal_api.suggestion_events import events
 from signal_api.suggestions import queue_suggestion_run
@@ -368,7 +369,7 @@ def create_confirmation_item(
         raise HTTPException(
             status_code=422, detail="Origin message must belong to this conversation"
         )
-    normalized_content = " ".join(request.content.casefold().split())
+    normalized_content = confirmation_item_key(request.content)
     item = db.scalar(
         select(ConversationConfirmationItem).where(
             ConversationConfirmationItem.conversation_id == conversation.id,
