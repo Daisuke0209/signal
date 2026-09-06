@@ -364,7 +364,13 @@ class ConversationConfirmationItem(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_content: Mapped[str] = mapped_column(String(500), nullable=False)
     status: Mapped[ConfirmationItemStatus] = mapped_column(
-        String(16),
+        Enum(
+            ConfirmationItemStatus,
+            native_enum=False,
+            create_constraint=False,
+            length=16,
+            values_callable=lambda enum_type: [entry.value for entry in enum_type],
+        ),
         nullable=False,
         server_default=text("'open'"),
     )
@@ -380,7 +386,14 @@ class ConversationConfirmationItem(Base):
         nullable=True,
     )
     confirmation_source: Mapped[ConfirmationSource | None] = mapped_column(
-        String(16), nullable=True
+        Enum(
+            ConfirmationSource,
+            native_enum=False,
+            create_constraint=False,
+            length=16,
+            values_callable=lambda enum_type: [entry.value for entry in enum_type],
+        ),
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

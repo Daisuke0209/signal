@@ -11,7 +11,10 @@ from sqlalchemy import delete, func, select
 from signal_api.database import SessionLocal
 from signal_api.main import app
 from signal_api.models import (
+    ConfirmationItemStatus,
+    ConfirmationSource,
     Conversation,
+    ConversationConfirmationItem,
     ConversationMessage,
     ConversationParticipant,
     ConversationStatus,
@@ -862,3 +865,28 @@ def test_confirmation_key_handles_casefold_expansion_and_equivalent_content(
         second = client.post(path, json={"content": "ＳＳＯ ss  条件"}).json()
         assert first["id"] == second["id"]
         assert len(client.get(path).json()["items"]) == 2
+
+
+def test_confirmation_status_and_source_rehydrate_as_enums(
+    conversation_user: tuple[uuid.UUID, uuid.UUID, str],
+) -> None:
+    oid, _, email = conversation_user
+    with TestClient(app) as client:
+        login(client, email)
+        cid = create_conversation(client, oid)
+        path = f"/conversations/{cid}/confirmation-items"
+        item = client.post(path, json={"content": "決裁者を確認する"}).json()
+        with SessionLocal() as fresh:
+            loaded = fresh.get(ConversationConfirmationItem, uuid.UUID(item["id"]))
+            assert loaded is not None
+            assert loaded.status is ConfirmationItemStatus.OPEN
+            assert loaded.confirmation_source is ConfirmationSource.MANUAL
+        changed = client.patch(
+            f"{path}/{item['id']}", json={"status": "confirmed", "expected_version": 1}
+        )
+        assert changed.status_code == 200
+        with SessionLocal() as fresh:
+            loaded = fresh.get(ConversationConfirmationItem, uuid.UUID(item["id"]))
+            assert loaded is not None
+            assert loaded.status is ConfirmationItemStatus.CONFIRMED
+            assert loaded.confirmation_source is ConfirmationSource.MANUAL
