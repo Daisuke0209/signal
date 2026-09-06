@@ -598,12 +598,12 @@ describe("authentication page", () => {
     render(<Home />);
 
     await screen.findByText("進行中の商談");
-    expect(suggestionMocks.connect).toHaveBeenCalledWith(
+    await waitFor(() => expect(suggestionMocks.connect).toHaveBeenCalledWith(
       detail.id,
       expect.any(Function),
       expect.any(Function),
       expect.any(Function),
-    );
+    ));
     const onState = suggestionMocks.connect.mock.calls[0][1] as (
       state: object,
     ) => void;
