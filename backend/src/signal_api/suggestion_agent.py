@@ -40,9 +40,16 @@ class AgentSuggestion(BaseModel):
     evidence_ids: list[str] = Field(max_length=5)
 
 
+class ConfirmationEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    confirmation_item_id: uuid.UUID
+    message_id: uuid.UUID
+
+
 class AgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     suggestions: list[AgentSuggestion] = Field(min_length=1, max_length=6)
+    confirmation_evidence: list[ConfirmationEvidence] = Field(max_length=6)
 
 
 class SearchArguments(BaseModel):
@@ -68,6 +75,10 @@ evidence_ids に根拠IDを付けてください。検索の根拠が足りな�
 資料の有無と検索可否は入力に示されます。利用できない場合は検索せず確認を促します。
 外部への連絡・承認・契約の実行を示唆せず、担当者が判断するための案だけを返します。
 原則として question、response、confirmation を一つずつ、不要なものは省略します。
+既存の確認事項を完了にするのは、会話発言が明示的に満たしている場合だけです。
+その場合のみ confirmation_evidence に確認事項IDと根拠発言IDを入れてください。
+推測、資料、
+未発話の予定は根拠にせず、手動訂正済みの確認事項は変更しません。
 短く具体的に、同じ提案を繰り返さないでください。検索は最大2回までです。"""
 
 SEARCH_TOOL: dict[str, Any] = {

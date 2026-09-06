@@ -28,7 +28,8 @@ def answer(evidence_ids: list[str] | None = None) -> dict[str, Any]:
                                 "content": "SSOの利用条件を確認します。",
                                 "evidence_ids": evidence_ids or [],
                             }
-                        ]
+                        ],
+                        "confirmation_evidence": [],
                     }
                 ),
             }
