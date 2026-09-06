@@ -334,14 +334,26 @@ def test_confirmation_item_auto_completion_respects_manual_reopen(actor: Actor) 
             confirmation_evidence=[],
         )
     )
+    finish(
+        AgentOutput(
+            suggestions=[
+                AgentSuggestion(
+                    kind="question", content="導入時期を確認する", evidence_ids=[]
+                )
+            ],
+            confirmation_evidence=[],
+        )
+    )
     with SessionLocal() as db:
-        item = db.scalar(
-            select(ConversationConfirmationItem).where(
-                ConversationConfirmationItem.conversation_id == cid
+        items = list(
+            db.scalars(
+                select(ConversationConfirmationItem).where(
+                    ConversationConfirmationItem.conversation_id == cid
+                )
             )
         )
-        assert item is not None
-        item_id = item.id
+        assert len(items) == 1
+        item_id = items[0].id
 
     finish(
         AgentOutput(
