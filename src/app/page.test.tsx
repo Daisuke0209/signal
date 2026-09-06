@@ -679,7 +679,7 @@ describe("authentication page", () => {
     expect(screen.getAllByText("根拠なし")).toHaveLength(1);
     expect(screen.queryByText("次に聞くこと")).toBeNull();
     expect(screen.queryByText("利用人数を確認します。")).toBeNull();
-    expect(screen.getByText("対象の顧客発言")).toBeDefined();
+    expect(screen.getAllByText("対象の顧客発言")).toHaveLength(2);
     expect(screen.getByText("SSOは利用できますか？")).toBeDefined();
 
     onState({
