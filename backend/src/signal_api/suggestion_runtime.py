@@ -16,6 +16,8 @@ from signal_api.database import SessionLocal
 from signal_api.documents import search_document_pages
 from signal_api.domain_traces import span, trace, trace_context
 from signal_api.models import (
+    ConfirmationItemStatus,
+    ConfirmationSource,
     Conversation,
     ConversationConfirmationItem,
     ConversationDocument,
@@ -28,6 +30,7 @@ from signal_api.models import (
     SuggestionKind,
     SuggestionRun,
     SuggestionRunStatus,
+    confirmation_item_key,
 )
 from signal_api.suggestion_agent import (
     AgentFailure,
@@ -178,7 +181,11 @@ class SuggestionRuntime:
             {
                 "documents": "available" if selected_ids else "no_searchable_documents",
                 "conversation": [
-                    {"side": participant.side.value, "text": message.content[:1500]}
+                    {
+                        "id": str(message.id),
+                        "side": participant.side.value,
+                        "text": message.content[:1500],
+                    }
                     for message, participant in reversed(rows)
                 ],
                 "confirmation_items": [
@@ -255,6 +262,60 @@ class SuggestionRuntime:
         ):
             fail_suggestion_run(db, rid, SuggestionErrorCode.INTERRUPTED)
             return
+        origin_message_id = db.scalar(
+            select(ConversationMessage.id).where(
+                ConversationMessage.conversation_id == cid,
+                ConversationMessage.sequence_number == run.input_sequence_number,
+            )
+        )
+        for suggestion in output.suggestions:
+            if suggestion.kind not in (
+                SuggestionKind.CONFIRMATION.value,
+                SuggestionKind.QUESTION.value,
+            ):
+                continue
+            normalized_content = confirmation_item_key(suggestion.content)
+            existing = db.scalar(
+                select(ConversationConfirmationItem).where(
+                    ConversationConfirmationItem.conversation_id == cid,
+                    ConversationConfirmationItem.normalized_content
+                    == normalized_content,
+                )
+            )
+            if existing is None:
+                db.add(
+                    ConversationConfirmationItem(
+                        conversation_id=cid,
+                        content=suggestion.content,
+                        normalized_content=normalized_content,
+                        origin_message_id=origin_message_id,
+                    )
+                )
+        for match in output.confirmation_evidence:
+            item = db.scalar(
+                select(ConversationConfirmationItem)
+                .where(
+                    ConversationConfirmationItem.id == match.confirmation_item_id,
+                    ConversationConfirmationItem.conversation_id == cid,
+                )
+                .with_for_update()
+            )
+            message = db.scalar(
+                select(ConversationMessage).where(
+                    ConversationMessage.id == match.message_id,
+                    ConversationMessage.conversation_id == cid,
+                )
+            )
+            if (
+                item is not None
+                and message is not None
+                and item.status is ConfirmationItemStatus.OPEN
+                and item.confirmation_source is not ConfirmationSource.MANUAL
+            ):
+                item.status = ConfirmationItemStatus.CONFIRMED
+                item.confirmation_source = ConfirmationSource.AUTO
+                item.evidence_message_id = message.id
+                item.version += 1
         complete_suggestion_run(
             db,
             rid,
