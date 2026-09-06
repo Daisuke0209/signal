@@ -46,6 +46,7 @@ import {
 } from "@/lib/suggestions-api";
 import styles from "./page.module.css";
 import { ConversationDocuments } from "@/components/conversation-documents";
+import { ConfirmationChecklist } from "@/components/confirmation-checklist";
 
 const DEMO_EMAIL = "demo@signal.local";
 
@@ -1135,15 +1136,6 @@ export default function Home() {
                 {suggestionStatus(suggestionRun, suggestionConnectionError)}
               </span>
             </div>
-            <section className={styles.nextQuestion}>
-              <div className={styles.suggestionHeading}>
-                <span aria-hidden="true">↗</span>
-                <h3>次に聞くこと</h3>
-              </div>
-              <SuggestionItems
-                suggestions={suggestionsFor(suggestionRun, "question")}
-              />
-            </section>
             <section className={styles.suggestionSection}>
               <div className={styles.suggestionHeading}>
                 <span aria-hidden="true">↳</span>
@@ -1153,15 +1145,18 @@ export default function Home() {
                 suggestions={suggestionsFor(suggestionRun, "response")}
               />
             </section>
-            <section className={styles.suggestionSection}>
-              <div className={styles.suggestionHeading}>
-                <span aria-hidden="true">✓</span>
-                <h3>確認事項</h3>
-              </div>
-              <SuggestionItems
-                suggestions={suggestionsFor(suggestionRun, "confirmation")}
+            {conversation ? (
+              <ConfirmationChecklist
+                conversationId={conversation.id}
+                ended={conversation.status === "ended"}
+                refreshToken={`${suggestionRun?.id ?? ""}:${suggestionRun?.revision ?? 0}`}
               />
-            </section>
+            ) : (
+              <section className={styles.suggestionSection}>
+                <div className={styles.suggestionHeading}><h3>確認事項</h3></div>
+                <p className={styles.suggestionHint}>商談を作成すると、確認事項を会話に沿って蓄積します。</p>
+              </section>
+            )}
             <section
               className={styles.approvalSection}
               aria-labelledby="approval-title"
