@@ -1,0 +1,19 @@
+.root { padding: 26px 4px; border-bottom: 1px solid var(--border); }
+.heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.heading h3 { font-size: 14px; font-weight: 600; color: #39485e; }
+.heading > span { color: #70819c; font-size: 11px; white-space: nowrap; }
+.description, .empty { margin-top: 12px; font-size: 12px; line-height: 1.8; color: #70819c; }
+.list { list-style: none; padding: 0; margin: 12px 0 0; max-height: 44vh; overflow-y: auto; scrollbar-gutter: stable; }
+.item { padding: 15px 5px 15px 0; border-bottom: 1px solid #edf0f4; }
+.item:last-child { border-bottom: none; }
+.check { display: flex; align-items: flex-start; gap: 11px; cursor: pointer; color: #39485e; font-size: 14px; line-height: 1.8; }
+.check input { flex: 0 0 auto; margin-top: 5px; width: 17px; height: 17px; accent-color: #4d7667; cursor: pointer; }
+.check input:focus-visible { outline: 2px solid #587cb5; outline-offset: 3px; }
+.check input:disabled { cursor: default; }
+.item[data-confirmed="true"] .check { color: #64776e; }
+.source { margin: 5px 0 0 28px; font-size: 11px; color: #7b8796; line-height: 1.6; }
+.evidence { margin: 9px 0 0 28px; padding: 8px 11px; border-left: 2px solid #cbdcd3; background: #f5f8f6; color: #5f7267; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.error { margin-top: 12px; color: #94423c; font-size: 12px; line-height: 1.7; }
+.error button { margin-top: 6px; border: 1px solid #d8dee7; padding: 5px 12px; border-radius: 6px; background: white; color: #51617b; cursor: pointer; }
+.notice { margin-top: 12px; color: #516b5e; font-size: 12px; line-height: 1.7; }
+.check span { min-width: 0; overflow-wrap: anywhere; }

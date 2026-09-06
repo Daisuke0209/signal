@@ -110,12 +110,19 @@ Live transcription and PDF access are part of the initial usable application.
    traces, and end-to-end verification.
 
 Use a minimalist light UI on a full second monitor: transcript on the left,
-next questions, response examples and confirmation items on the right. Keep
+response examples with their customer question and a cumulative confirmation checklist on the right. Keep
 PDF management and conversation history in separate views.
 
 See `docs/product-and-architecture.md` for the agreed experience, responsibility
 boundaries, tradeoffs and acceptance checklist. Features in that document are
 planned until their individual Issues are implemented and verified.
+
+The 2026-09-06 feedback integrates “next questions” into a persistent confirmation
+checklist. Confirmations accumulate across suggestion generations, are automatically
+checked from explicit conversation evidence, and support manual corrections that
+later automatic updates must respect. Response examples identify the actual customer
+message they answer. Transcript auto-follow preserves the position while reading older
+messages. Track these changes in Issues #105–#109.
 
 ### Current status
 

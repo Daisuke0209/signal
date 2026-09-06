@@ -21,6 +21,11 @@ vi.mock("@/lib/suggestions-api", () => ({
   connectSuggestionEvents: suggestionMocks.connect,
   getLatestSuggestions: suggestionMocks.getLatest,
 }));
+vi.mock("@/lib/confirmation-items-api", () => ({
+  getConfirmationItems: async () => [],
+  updateConfirmationItem: vi.fn(),
+  ConfirmationRequestError: class extends Error { status = 0; },
+}));
 const audioMocks = vi.hoisted(() => ({ start: vi.fn() }));
 vi.mock("@/lib/audio-capture", () => ({
   startAudioCapture: audioMocks.start,
@@ -593,12 +598,12 @@ describe("authentication page", () => {
     render(<Home />);
 
     await screen.findByText("進行中の商談");
-    expect(suggestionMocks.connect).toHaveBeenCalledWith(
+    await waitFor(() => expect(suggestionMocks.connect).toHaveBeenCalledWith(
       detail.id,
       expect.any(Function),
       expect.any(Function),
       expect.any(Function),
-    );
+    ));
     const onState = suggestionMocks.connect.mock.calls[0][1] as (
       state: object,
     ) => void;
@@ -638,7 +643,7 @@ describe("authentication page", () => {
           suggestions: [
             {
               id: "question-1",
-              kind: "question",
+              kind: "response",
               content: "導入時期を確認しますか？",
               position: 0,
               sources: [
@@ -671,8 +676,10 @@ describe("authentication page", () => {
       });
     expect(await screen.findByText("導入時期を確認しますか？")).toBeDefined();
     expect(screen.getByText("料金表 · p.2")).toBeDefined();
-    expect(screen.getAllByText("根拠なし")).toHaveLength(2);
-    expect(screen.getByText("対象の顧客発言")).toBeDefined();
+    expect(screen.getAllByText("根拠なし")).toHaveLength(1);
+    expect(screen.queryByText("次に聞くこと")).toBeNull();
+    expect(screen.queryByText("利用人数を確認します。")).toBeNull();
+    expect(screen.getAllByText("対象の顧客発言")).toHaveLength(2);
     expect(screen.getByText("SSOは利用できますか？")).toBeDefined();
 
     onState({
@@ -719,7 +726,7 @@ describe("authentication page", () => {
           suggestions: [
             {
               id: "stale",
-              kind: "question",
+              kind: "response",
               content: "古い提案",
               position: 0,
               sources: [],
@@ -807,7 +814,7 @@ describe("authentication page", () => {
           suggestions: [
             {
               id: "proposal-1",
-              kind: "question",
+              kind: "response",
               content: "最初の提案",
               position: 0,
               sources: [],
