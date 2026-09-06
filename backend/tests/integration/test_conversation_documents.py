@@ -186,7 +186,8 @@ def test_selection_change_invalidates_old_generation_and_noop_preserves_generati
                 evidence_ids=[],
                 customer_message_id=None,
             )
-        ]
+        ],
+        confirmation_evidence=[],
     )
 
     async def finish_old() -> None:

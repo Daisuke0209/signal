@@ -121,7 +121,7 @@ def test_final_message_automatically_pushes_ordered_states_and_persists_result(
                                                     "customer_message_id": None,
                                                 }
                                             ],
-                                            "confirmation_evidence": []
+                                            "confirmation_evidence": [],
                                         }
                                     ),
                                 }
@@ -199,7 +199,8 @@ def test_newer_input_prevents_old_generation_result_publication(actor: Actor) ->
                 evidence_ids=[],
                 customer_message_id=None,
             )
-        ]
+        ],
+        confirmation_evidence=[],
     )
 
     async def scenario() -> None:
